@@ -1,6 +1,6 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-auth.js";
-import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-firestore.js";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, onSnapshot, setDoc } from "firebase/firestore";
 
 // Your Firebase Config
 const firebaseConfig = {
@@ -20,20 +20,17 @@ export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
 /**
- * SYNC LOGIC: This listens for changes in the cloud 
- * and updates your local app automatically.
+ * MASTER SYNC LISTENER
+ * This listens for ANY changes in the cloud and tells App.tsx to update.
  */
 onAuthStateChanged(auth, (user) => {
   if (user) {
-    console.log("Logged in as:", user.email);
+    console.log("Real-time sync active for:", user.email);
     
-    // Listen for data changes in Firestore for this specific user
     onSnapshot(doc(db, "users", user.uid), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        console.log("Cloud data received:", data);
-        
-        // This triggers a custom event that your main app can listen to
+        // This sends the "firebase-sync" signal that your App.tsx is waiting for
         const syncEvent = new CustomEvent('firebase-sync', { detail: data });
         window.dispatchEvent(syncEvent);
       }
@@ -42,20 +39,26 @@ onAuthStateChanged(auth, (user) => {
 });
 
 /**
- * SAVE LOGIC: Call this function when the timer ends 
- * to send data to the cloud.
+ * MASTER SAVE FUNCTION
+ * This is the function App.tsx was looking for!
+ * It saves all your subjects, goals, and sessions at once.
  */
-export const saveUserProgress = async (minutes) => {
+export const syncAllData = async (data: any) => {
   const user = auth.currentUser;
   if (user) {
     try {
       await setDoc(doc(db, "users", user.uid), {
-        focusMinutes: minutes,
+        ...data,
         lastUpdated: new Date()
       }, { merge: true });
-      console.log("Progress saved to cloud!");
+      console.log("Cloud sync successful");
     } catch (error) {
-      console.error("Error saving to cloud:", error);
+      console.error("Cloud sync failed:", error);
     }
   }
+};
+
+// Kept for your older timer logic
+export const saveUserProgress = async (minutes: number) => {
+  await syncAllData({ focusMinutes: minutes });
 };
