@@ -82,38 +82,35 @@ const App: React.FC = () => {
   const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
 // --- CLOUD SYNC LISTENER ---
   useEffect(() => {
-    const handleSync = (event: Event) => {
-      const customEvent = event as CustomEvent;
-      const cloudData = customEvent.detail;
+    const handleSync = (event: any) => {
+      const cloudData = event.detail;
       if (!cloudData) return;
 
-      console.log("Cloud sync received:", cloudData);
-
+      // Update local state with cloud data
       if (cloudData.subjects) setSubjects(cloudData.subjects);
       if (cloudData.allSessions) setAllSessions(cloudData.allSessions);
       if (cloudData.dailyGoals) setDailyGoals(cloudData.dailyGoals);
       if (cloudData.tasks) setTasks(cloudData.tasks);
       if (cloudData.targetHours) setTargetHours(cloudData.targetHours);
-      if (cloudData.wallpaper) setWallpaper(cloudData.wallpaper);
     };
 
     window.addEventListener('firebase-sync', handleSync);
     return () => window.removeEventListener('firebase-sync', handleSync);
-  }, [subjects, allSessions, dailyGoals, tasks, targetHours, wallpaper]); // Added dependencies for safety
+  }, []);
 
   // --- AUTO-SAVE TRIGGER ---
   useEffect(() => {
+    // Note: using 'currentUser' as defined on your line 51
     if (currentUser) {
       syncAllData({
         subjects,
         allSessions,
         dailyGoals,
         tasks,
-        targetHours,
-        wallpaper
-      }).catch(err => console.error("Sync failed:", err));
+        targetHours
+      });
     }
-  }, [subjects, allSessions, dailyGoals, tasks, targetHours, wallpaper, currentUser]);
+  }, [subjects, allSessions, dailyGoals, tasks, targetHours, currentUser]);
   useEffect(() => {
     const initData = async () => {
       try {
