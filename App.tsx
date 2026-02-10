@@ -1,3 +1,4 @@
+import { syncAllData } from './services/firebase';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStopwatch } from './hooks/useStopwatch';
 import { SubjectPicker } from './components/SubjectPicker';
@@ -79,7 +80,40 @@ const App: React.FC = () => {
 
   // Firebase Config State
   const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
+// --- CLOUD SYNC LISTENER ---
+  useEffect(() => {
+    const handleSync = (event: any) => {
+      const cloudData = event.detail;
+      if (!cloudData) return;
 
+      console.log("Cloud sync received:", cloudData);
+
+      // Mapping cloud data to your specific variables
+      if (cloudData.subjects) setSubjects(cloudData.subjects);
+      if (cloudData.allSessions) setAllSessions(cloudData.allSessions);
+      if (cloudData.dailyGoals) setDailyGoals(cloudData.dailyGoals);
+      if (cloudData.tasks) setTasks(cloudData.tasks);
+      if (cloudData.targetHours) setTargetHours(cloudData.targetHours);
+      if (cloudData.wallpaper) setWallpaper(cloudData.wallpaper);
+    };
+
+    window.addEventListener('firebase-sync', handleSync);
+    return () => window.removeEventListener('firebase-sync', handleSync);
+  }, []);
+
+  // --- AUTO-SAVE TRIGGER ---
+  useEffect(() => {
+    if (currentUser) {
+      syncAllData({
+        subjects,
+        allSessions,
+        dailyGoals,
+        tasks,
+        targetHours,
+        wallpaper
+      });
+    }
+  }, [subjects, allSessions, dailyGoals, tasks, targetHours, wallpaper, currentUser]);
   // Init
   useEffect(() => {
     const initData = async () => {
