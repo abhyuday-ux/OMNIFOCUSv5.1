@@ -82,13 +82,13 @@ const App: React.FC = () => {
   const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
 // --- CLOUD SYNC LISTENER ---
   useEffect(() => {
-    const handleSync = (event: any) => {
-      const cloudData = event.detail;
+    const handleSync = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const cloudData = customEvent.detail;
       if (!cloudData) return;
 
       console.log("Cloud sync received:", cloudData);
 
-      // Mapping cloud data to your specific variables
       if (cloudData.subjects) setSubjects(cloudData.subjects);
       if (cloudData.allSessions) setAllSessions(cloudData.allSessions);
       if (cloudData.dailyGoals) setDailyGoals(cloudData.dailyGoals);
@@ -99,7 +99,7 @@ const App: React.FC = () => {
 
     window.addEventListener('firebase-sync', handleSync);
     return () => window.removeEventListener('firebase-sync', handleSync);
-  }, []);
+  }, [subjects, allSessions, dailyGoals, tasks, targetHours, wallpaper]); // Added dependencies for safety
 
   // --- AUTO-SAVE TRIGGER ---
   useEffect(() => {
@@ -111,10 +111,9 @@ const App: React.FC = () => {
         tasks,
         targetHours,
         wallpaper
-      });
+      }).catch(err => console.error("Sync failed:", err));
     }
   }, [subjects, allSessions, dailyGoals, tasks, targetHours, wallpaper, currentUser]);
-  // Init
   useEffect(() => {
     const initData = async () => {
       try {
