@@ -80,37 +80,24 @@ const App: React.FC = () => {
 
   // Firebase Config State
   const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
-// --- CLOUD SYNC LISTENER ---
-  useEffect(() => {
-    const handleSync = (event: any) => {
-      const cloudData = event.detail;
-      if (!cloudData) return;
+useEffect(() => {
+    const initData = async () => {
+      // If we have a user, STOP here. Let the Cloud Sync Listener (Line 82)
+      // handle the data so we don't load old local storage data.
+      if (currentUser) return; 
 
-      // Update local state with cloud data
-      if (cloudData.subjects) setSubjects(cloudData.subjects);
-      if (cloudData.allSessions) setAllSessions(cloudData.allSessions);
-      if (cloudData.dailyGoals) setDailyGoals(cloudData.dailyGoals);
-      if (cloudData.tasks) setTasks(cloudData.tasks);
-      if (cloudData.targetHours) setTargetHours(cloudData.targetHours);
+      // Fallback: Only load from browser memory if NOT logged in
+      const savedTarget = localStorage.getItem('studySync_targetHours');
+      if (savedTarget) setTargetHours(parseFloat(savedTarget));
+      
+      await refreshSubjects();
+      loadSessions();
+      loadGoals();
+      loadTasks();
     };
 
-    window.addEventListener('firebase-sync', handleSync);
-    return () => window.removeEventListener('firebase-sync', handleSync);
-  }, []);
-
-  // --- AUTO-SAVE TRIGGER ---
-  useEffect(() => {
-    // Note: using 'currentUser' as defined on your line 51
-    if (currentUser) {
-      syncAllData({
-        subjects,
-        allSessions,
-        dailyGoals,
-        tasks,
-        targetHours
-      });
-    }
-  }, [subjects, allSessions, dailyGoals, tasks, targetHours, currentUser]);
+    initData();
+  }, [currentUser]);
   useEffect(() => {
     const initData = async () => {
       try {
