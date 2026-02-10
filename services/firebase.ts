@@ -1,10 +1,9 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getAnalytics, isSupported } from "firebase/analytics";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-auth.js";
+import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-firestore.js";
 
-// Default Config (Updated with user provided credentials)
-const DEFAULT_CONFIG = {
+// Your Firebase Config
+const firebaseConfig = {
   apiKey: "AIzaSyDhJGMrYH0PXZkVASHfJ1Cb7-QSSQuTauE",
   authDomain: "omnifocus-7cb1a.firebaseapp.com",
   projectId: "omnifocus-7cb1a",
@@ -14,37 +13,49 @@ const DEFAULT_CONFIG = {
   measurementId: "G-V0TCKBN14G"
 };
 
-// Function to get config (checks LocalStorage first for overrides)
-const getFirebaseConfig = () => {
-  try {
-    const saved = localStorage.getItem('omni_firebase_config');
-    if (saved) {
-      const config = JSON.parse(saved);
-      if (config.apiKey && config.authDomain) {
-        console.log("Using custom Firebase configuration from settings.");
-        return config;
-      }
-    }
-  } catch (e) {
-    console.warn("Failed to parse custom firebase config from localStorage", e);
-  }
-  return DEFAULT_CONFIG;
-};
-
-// Initialize App
-const app = initializeApp(getFirebaseConfig());
-
-// Initialize Services
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Analytics (Safe initialization)
-let analytics = null;
-isSupported().then((supported) => {
-  if (supported) {
-    analytics = getAnalytics(app);
+/**
+ * SYNC LOGIC: This listens for changes in the cloud 
+ * and updates your local app automatically.
+ */
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    console.log("Logged in as:", user.email);
+    
+    // Listen for data changes in Firestore for this specific user
+    onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        console.log("Cloud data received:", data);
+        
+        // This triggers a custom event that your main app can listen to
+        const syncEvent = new CustomEvent('firebase-sync', { detail: data });
+        window.dispatchEvent(syncEvent);
+      }
+    });
   }
-}).catch(console.error);
+});
 
-export { analytics };
+/**
+ * SAVE LOGIC: Call this function when the timer ends 
+ * to send data to the cloud.
+ */
+export const saveUserProgress = async (minutes) => {
+  const user = auth.currentUser;
+  if (user) {
+    try {
+      await setDoc(doc(db, "users", user.uid), {
+        focusMinutes: minutes,
+        lastUpdated: new Date()
+      }, { merge: true });
+      console.log("Progress saved to cloud!");
+    } catch (error) {
+      console.error("Error saving to cloud:", error);
+    }
+  }
+};
