@@ -1,32 +1,46 @@
-name: Deploy OMNIFOCUSv5.1 to GitHub Pages
+name: Build and Deploy
 
 on:
   push:
-    branches: [main]
+    branches: ["main"]
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: Install and Build
-        run: |
-          npm install
-          npm run build
+      - name: Install Dependencies
+        # This flag fixes the "ERESOLVE" red cross error
+        run: npm install --legacy-peer-deps
 
-      - name: Deploy
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Build Project
+        # CI=false prevents small warnings from stopping the build
+        run: CI=false npm run build
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
