@@ -1,0 +1,450 @@
+
+import React, { useState, useEffect } from 'react';
+import { dbService } from '../services/db';
+import { Friend, UserProfile, Task } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { Users, Search, UserPlus, Clock, Trophy, Zap, X, Check, Mail, Activity, Circle, CheckCircle2 } from 'lucide-react';
+import { rtdb } from '../services/firebase';
+import { ref, onValue, off } from 'firebase/database';
+
+// --- Helper Components ---
+
+const StatusIndicator: React.FC<{ isOnline?: boolean; isFocusing?: boolean }> = ({ isOnline, isFocusing }) => {
+    if (isFocusing) {
+        return (
+            <div className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500 border border-slate-900"></span>
+            </div>
+        );
+    }
+    if (isOnline) {
+        return <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />;
+    }
+    return <div className="h-2 w-2 rounded-full border border-slate-600" />;
+};
+
+const formatDuration = (ms: number) => {
+    const hours = Math.floor(ms / 3600000);
+    const minutes = Math.floor((ms % 3600000) / 60000);
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+};
+
+// Isolated Row Component to prevent full list re-renders on ticker
+const FriendRow: React.FC<{ 
+    friend: Friend; 
+    rank: number; 
+    onClick: () => void 
+}> = ({ friend, rank, onClick }) => {
+    const [liveTime, setLiveTime] = useState<number>(friend.rtStatus?.todayBaseMs || 0);
+    const [isFocusing, setIsFocusing] = useState(false);
+    const [isOnline, setIsOnline] = useState(false);
+
+    // Local RTDB Listener for this specific friend
+    useEffect(() => {
+        const statusRef = ref(rtdb, `status/${friend.uid}`);
+        
+        const handleUpdate = (snapshot: any) => {
+            const val = snapshot.val();
+            if (val) {
+                setIsOnline(val.state === 'online');
+                setIsFocusing(val.isFocusing);
+                
+                // Base time from completed sessions
+                let total = val.todayBaseMs || 0;
+                
+                // If actively running, add elapsed time since start
+                if (val.isFocusing && val.currentSessionStart) {
+                    const elapsed = Math.max(0, Date.now() - val.currentSessionStart);
+                    total += elapsed;
+                }
+                setLiveTime(total);
+            } else {
+                // Default fallback if no RTDB data (offline/new user)
+                setIsOnline(false);
+                setIsFocusing(false);
+                setLiveTime(friend.profile?.totalFocusMs || 0); // Note: This might be lifetime in profile, ideally should sync today
+            }
+        };
+
+        onValue(statusRef, handleUpdate);
+        return () => off(statusRef);
+    }, [friend.uid]);
+
+    // Local Ticker for smooth animation if focusing
+    useEffect(() => {
+        if (!isFocusing) return;
+        const interval = setInterval(() => {
+            setLiveTime(prev => prev + 1000);
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [isFocusing]);
+
+    return (
+        <motion.div 
+            layout // Framer Motion layout prop for smooth reordering
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={onClick}
+            className={`
+                flex items-center justify-between p-3 rounded-xl border border-white/5 cursor-pointer
+                bg-white/[0.02] hover:bg-white/5 transition-colors group
+                ${rank === 1 ? 'border-amber-500/20 bg-amber-500/5' : ''}
+            `}
+        >
+            <div className="flex items-center gap-4">
+                <span className={`
+                    w-6 text-center text-xs font-mono font-bold 
+                    ${rank === 1 ? 'text-amber-400' : rank === 2 ? 'text-slate-300' : rank === 3 ? 'text-orange-400' : 'text-slate-600'}
+                `}>
+                    #{rank}
+                </span>
+                
+                <div className="relative">
+                    {friend.profile?.photoURL ? (
+                        <img src={friend.profile.photoURL} className="w-10 h-10 rounded-xl object-cover bg-slate-800" />
+                    ) : (
+                        <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
+                            {friend.profile?.displayName?.[0] || '?'}
+                        </div>
+                    )}
+                    <div className="absolute -bottom-1 -right-1">
+                        <StatusIndicator isOnline={isOnline} isFocusing={isFocusing} />
+                    </div>
+                </div>
+
+                <div>
+                    <h4 className="font-bold text-sm text-slate-200 group-hover:text-white transition-colors">
+                        {friend.profile?.displayName || 'Unknown'}
+                    </h4>
+                    <p className="text-[10px] text-slate-500 font-mono">
+                        @{friend.profile?.username}
+                    </p>
+                </div>
+            </div>
+
+            <div className="text-right">
+                <div className={`text-sm font-mono font-bold ${isFocusing ? 'text-blue-400' : 'text-slate-300'}`}>
+                    {formatDuration(liveTime)}
+                </div>
+                <div className="text-[9px] text-slate-500 font-medium uppercase tracking-wider">
+                    {isFocusing ? 'Focusing...' : 'Today'}
+                </div>
+            </div>
+        </motion.div>
+    );
+};
+
+// --- Main Component ---
+
+interface SocialPanelProps {
+    onClose?: () => void;
+}
+
+export const SocialPanel: React.FC<SocialPanelProps> = ({ onClose }) => {
+    const { currentUser } = useAuth();
+    const { accent } = useTheme();
+    const [friends, setFriends] = useState<Friend[]>([]);
+    const [activeTab, setActiveTab] = useState<'leaderboard' | 'requests' | 'add'>('leaderboard');
+    
+    // Search
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResult, setSearchResult] = useState<UserProfile | null>(null);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [requestSent, setRequestSent] = useState(false);
+
+    // Detail View
+    const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
+    const [friendTasks, setFriendTasks] = useState<Task[]>([]);
+    const [tasksLoading, setTasksLoading] = useState(false);
+
+    // Subscribe to Friends List (Firestore)
+    useEffect(() => {
+        const unsubscribe = dbService.subscribeToFriends((updatedFriends) => {
+            setFriends(updatedFriends);
+        });
+        return () => { if (unsubscribe) unsubscribe(); };
+    }, []);
+
+    const handleSearch = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!searchQuery.trim()) return;
+        setSearchLoading(true);
+        setSearchResult(null);
+        setRequestSent(false);
+        try {
+            const user = await dbService.findUserByUsername(searchQuery.trim());
+            if (user && user.uid !== currentUser?.uid) {
+                setSearchResult(user);
+            } else {
+                setSearchResult(null);
+            }
+        } catch (e) { console.error(e); } 
+        finally { setSearchLoading(false); }
+    };
+
+    const sendRequest = async () => {
+        if (searchResult) {
+            await dbService.sendFriendRequest(searchResult.uid);
+            setRequestSent(true);
+        }
+    };
+
+    const acceptRequest = async (uid: string) => {
+        await dbService.acceptFriendRequest(uid);
+    };
+
+    const handleFriendClick = async (friend: Friend) => {
+        setSelectedFriend(friend);
+        setTasksLoading(true);
+        const today = new Date().toISOString().split('T')[0];
+        const tasks = await dbService.getFriendTasks(friend.uid, today);
+        setFriendTasks(tasks);
+        setTasksLoading(false);
+    };
+
+    const acceptedFriends = friends.filter(f => f.status === 'accepted');
+    const pendingRequests = friends.filter(f => f.status === 'pending_received');
+
+    // Sort by totalFocusMs as a baseline for stability
+    const sortedFriends = [...acceptedFriends].sort((a, b) => (b.profile?.totalFocusMs || 0) - (a.profile?.totalFocusMs || 0));
+
+    return (
+        <div className="h-full flex flex-col bg-slate-900/60 backdrop-blur-xl border-l border-white/10 w-full md:w-96 shadow-2xl relative overflow-hidden">
+            {/* Header */}
+            <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-900/80">
+                <div className="flex items-center gap-3">
+                    <div className={`p-2 bg-${accent}-500/20 rounded-xl text-${accent}-400`}>
+                        <Users size={20} />
+                    </div>
+                    <div>
+                        <h2 className="font-bold text-white text-sm uppercase tracking-wide">Mission Control</h2>
+                        <p className="text-[10px] text-slate-500 font-mono">Friends & Status</p>
+                    </div>
+                </div>
+                {onClose && (
+                    <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors">
+                        <X size={18} />
+                    </button>
+                )}
+            </div>
+
+            {/* Navigation */}
+            <div className="px-4 py-3 bg-slate-950/30 border-b border-white/5">
+                <div className="flex p-1 bg-slate-800/50 rounded-lg border border-white/5">
+                    {[
+                        { id: 'leaderboard', icon: Trophy, label: 'Board' },
+                        { id: 'requests', icon: Mail, label: 'Req', count: pendingRequests.length },
+                        { id: 'add', icon: UserPlus, label: 'Add' }
+                    ].map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id as any)}
+                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all relative ${activeTab === tab.id ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                            <tab.icon size={12} />
+                            {tab.label}
+                            {tab.count ? (
+                                <span className="bg-rose-500 text-white text-[9px] px-1 rounded-full">{tab.count}</span>
+                            ) : null}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Content Area */}
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
+                <AnimatePresence mode="wait">
+                    
+                    {/* DETAIL VIEW */}
+                    {selectedFriend ? (
+                        <motion.div 
+                            key="detail"
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="absolute inset-0 z-50 bg-slate-900 p-6 flex flex-col overflow-hidden"
+                        >
+                            <button onClick={() => setSelectedFriend(null)} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white">
+                                <X size={18} />
+                            </button>
+                            
+                            <div className="text-center mb-8">
+                                <div className="w-20 h-20 mx-auto rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-3xl font-bold border border-white/10 shadow-lg mb-4">
+                                    {selectedFriend.profile?.photoURL ? (
+                                        <img src={selectedFriend.profile.photoURL} className="w-full h-full rounded-2xl object-cover" />
+                                    ) : (
+                                        selectedFriend.profile?.displayName?.[0]
+                                    )}
+                                </div>
+                                <h3 className="text-xl font-bold text-white">{selectedFriend.profile?.displayName}</h3>
+                                <p className="text-xs text-slate-500 font-mono mt-1">@{selectedFriend.profile?.username}</p>
+                            </div>
+
+                            <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 mb-6">
+                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                    <Activity size={12} className="text-emerald-400" /> Today's Activity
+                                </div>
+                                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                                    {tasksLoading ? (
+                                        <div className="text-center py-4 text-xs text-slate-500">Loading...</div>
+                                    ) : friendTasks.length === 0 ? (
+                                        <div className="text-center py-8 text-slate-600 text-xs italic border border-dashed border-white/5 rounded-lg">
+                                            No public tasks visible.
+                                        </div>
+                                    ) : (
+                                        friendTasks.map(task => (
+                                            <div key={task.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                                                {task.status === 'done' ? (
+                                                    <CheckCircle2 size={16} className="text-emerald-500 flex-none" />
+                                                ) : (
+                                                    <Circle size={16} className="text-slate-600 flex-none" />
+                                                )}
+                                                <span className={`text-xs ${task.status === 'done' ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
+                                                    {task.title}
+                                                </span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </motion.div>
+                    ) : (
+                        
+                        /* LIST VIEWS */
+                        <>
+                            {activeTab === 'leaderboard' && (
+                                <motion.div 
+                                    key="leaderboard"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="space-y-2"
+                                >
+                                    <LayoutGroup>
+                                        {sortedFriends.length === 0 ? (
+                                            <div className="text-center py-10 opacity-50">
+                                                <Trophy size={40} className="mx-auto mb-2 text-slate-600" />
+                                                <p className="text-xs text-slate-400">Add friends to compete.</p>
+                                            </div>
+                                        ) : (
+                                            sortedFriends.map((friend, i) => (
+                                                <FriendRow 
+                                                    key={friend.uid} 
+                                                    friend={friend} 
+                                                    rank={i + 1}
+                                                    onClick={() => handleFriendClick(friend)}
+                                                />
+                                            ))
+                                        )}
+                                    </LayoutGroup>
+                                </motion.div>
+                            )}
+
+                            {activeTab === 'requests' && (
+                                <motion.div 
+                                    key="requests"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="space-y-3"
+                                >
+                                    {pendingRequests.length === 0 ? (
+                                        <div className="text-center py-10 opacity-50">
+                                            <Mail size={40} className="mx-auto mb-2 text-slate-600" />
+                                            <p className="text-xs text-slate-400">No pending requests.</p>
+                                        </div>
+                                    ) : (
+                                        pendingRequests.map(req => (
+                                            <div key={req.uid} className="bg-white/5 p-4 rounded-xl border border-white/10">
+                                                <div className="flex items-center gap-3 mb-3">
+                                                    <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
+                                                        {req.profile?.displayName?.[0] || '?'}
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-200">{req.profile?.displayName}</h4>
+                                                        <p className="text-xs text-slate-500">@{req.profile?.username}</p>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    onClick={() => acceptRequest(req.uid)}
+                                                    className={`w-full py-2 bg-${accent}-600 hover:bg-${accent}-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2`}
+                                                >
+                                                    <Check size={14} /> Accept Request
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </motion.div>
+                            )}
+
+                            {activeTab === 'add' && (
+                                <motion.div 
+                                    key="add"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                >
+                                    <form onSubmit={handleSearch} className="mb-6">
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                                            <input 
+                                                className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-600"
+                                                placeholder="Search by @username..."
+                                                value={searchQuery}
+                                                onChange={e => setSearchQuery(e.target.value)}
+                                            />
+                                        </div>
+                                        <button 
+                                            type="submit"
+                                            disabled={!searchQuery || searchLoading}
+                                            className={`mt-2 w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs transition-colors`}
+                                        >
+                                            {searchLoading ? 'Searching...' : 'Find User'}
+                                        </button>
+                                    </form>
+
+                                    {searchResult && (
+                                        <div className="bg-slate-800/50 p-4 rounded-xl border border-white/10 text-center animate-in fade-in zoom-in-95">
+                                            <div className="w-16 h-16 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto mb-3 text-xl font-bold overflow-hidden">
+                                                {searchResult.photoURL ? (
+                                                    <img src={searchResult.photoURL} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    searchResult.displayName[0]
+                                                )}
+                                            </div>
+                                            <h3 className="font-bold text-white text-lg">{searchResult.displayName}</h3>
+                                            <p className="text-xs text-slate-400 mb-4">@{searchResult.username}</p>
+                                            
+                                            {requestSent ? (
+                                                <div className="text-emerald-400 text-xs font-bold flex items-center justify-center gap-2 bg-emerald-500/10 py-2 rounded-lg">
+                                                    <Check size={14} /> Request Sent
+                                                </div>
+                                            ) : (
+                                                <button 
+                                                    onClick={sendRequest}
+                                                    className={`w-full py-2 bg-${accent}-600 hover:bg-${accent}-500 text-white rounded-lg text-xs font-bold`}
+                                                >
+                                                    Send Friend Request
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                    
+                                    {!searchResult && !searchLoading && searchQuery && !requestSent && (
+                                        <div className="text-center text-slate-500 text-xs mt-4">
+                                            No user found. Try searching by username.
+                                        </div>
+                                    )}
+                                </motion.div>
+                            )}
+                        </>
+                    )}
+                </AnimatePresence>
+            </div>
+        </div>
+    );
+};
