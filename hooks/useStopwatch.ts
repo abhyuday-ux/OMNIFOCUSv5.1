@@ -107,7 +107,18 @@ export const useStopwatch = (
         durationMs: finalTime,
         dateString: new Date().toISOString().split('T')[0],
       };
-      await dbService.saveSession(session);
+      
+      // Save session and get level up status
+      const { levelUp, newLevel } = await dbService.saveSession(session);
+      
+      if (levelUp) {
+          // Dispatch a custom event for the UI to handle celebration
+          const event = new CustomEvent('ekagra_levelup', { 
+              detail: { level: newLevel } 
+          });
+          window.dispatchEvent(event);
+      }
+
       onSessionComplete();
     }
 

@@ -1,16 +1,18 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { StudySession, Subject, isHexColor, getLocalDateString } from '../types';
+import { StudySession, Subject, isHexColor, getLocalDateString, UserProfile } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Target, Flame, Clock, Moon, Sun, Sunset,
   Plus, ArrowRight, Calendar, 
   CheckCircle2, AlertTriangle, Lock,
   Trophy, BarChart2, Zap, BookOpen, CalendarDays,
-  Sparkles, TrendingUp, MoreHorizontal, PieChart, ArrowUpRight, ArrowDownRight, History, Activity
+  Sparkles, TrendingUp, MoreHorizontal, PieChart, ArrowUpRight, ArrowDownRight, History, Activity, Shield
 } from 'lucide-react';
 import { SubjectDonut } from './SubjectDonut';
+import { dbService } from '../services/db';
+import { getLevelProgress, getRankInfo } from '../utils/xp';
 
 interface DashboardProps {
   sessions: StudySession[];
@@ -30,6 +32,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const { accent } = useTheme();
   const [timeOfDay, setTimeOfDay] = useState('');
   const [isDayCompleted, setIsDayCompleted] = useState(false);
+  
+  // User Profile State for XP/Level
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   // Use local date string to fix timezone bugs
   const todayStr = getLocalDateString();
@@ -42,6 +47,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     const completed = localStorage.getItem(`omni_completed_${todayStr}`);
     if (completed === 'true') setIsDayCompleted(true);
+
+    // Fetch User Profile for XP
+    const fetchProfile = async () => {
+        const profile = await dbService.getUserProfile();
+        setUserProfile(profile);
+    };
+    fetchProfile();
+
+    const handleSync = () => fetchProfile();
+    window.addEventListener('ekagrazone_sync_complete', handleSync);
+    
+    // Listen for level up events to refresh immediately
+    window.addEventListener('ekagra_levelup', handleSync);
+
+    return () => {
+        window.removeEventListener('ekagrazone_sync_complete', handleSync);
+        window.removeEventListener('ekagra_levelup', handleSync);
+    };
   }, [todayStr]);
 
   // --- Calculations ---
@@ -152,6 +175,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return `${h}h ${m}m`;
   };
 
+  // XP & Level Logic
+  const levelData = useMemo(() => {
+      const xp = userProfile?.xp || 0;
+      return getLevelProgress(xp);
+  }, [userProfile]);
+
+  const rankInfo = getRankInfo(levelData.currentLevel);
+
   const containerVariants = {
     hidden: { opacity: 0 },
     show: {
@@ -208,7 +239,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* 2. Main Dashboard Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6">
                 
-                {/* Hero Card */}
+                {/* Hero Card / XP Rank Card */}
                 <motion.div 
                     variants={itemVariants}
                     className="col-span-2 bg-gradient-to-br from-slate-900 to-slate-950 border border-white/10 rounded-[2rem] p-6 lg:p-8 relative overflow-hidden group shadow-2xl flex flex-col justify-between min-h-[240px]"
@@ -217,86 +248,73 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10"></div>
                     
                     <div className="relative z-10 flex justify-between items-start">
-                        <div>
-                            <div className="flex items-center gap-2 mb-3">
-                                <div className={`p-1.5 rounded-lg bg-${accent}-500/20 text-${accent}-400 ring-1 ring-${accent}-500/30`}>
-                                    <Target size={16} />
+                        <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-4">
+                                {/* Rank Badge */}
+                                <div className="relative">
+                                    <div className={`absolute inset-0 ${rankInfo.bg} blur-md opacity-20 rounded-full`}></div>
+                                    <div className={`relative w-12 h-12 bg-gradient-to-b from-slate-800 to-slate-900 rounded-xl flex items-center justify-center shadow-lg border border-white/10 transform rotate-3 ${rankInfo.border}`}>
+                                        <span className={`font-bold text-lg ${rankInfo.color}`}>{levelData.currentLevel}</span>
+                                    </div>
+                                    <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 bg-slate-900 text-[8px] font-bold ${rankInfo.color} px-1.5 py-0.5 rounded border border-white/10 uppercase tracking-wider`}>
+                                        Rank
+                                    </div>
                                 </div>
-                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Daily Goal</span>
+                                
+                                <div>
+                                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Current Level</div>
+                                    <div className={`text-white font-bold text-lg ${rankInfo.color}`}>{rankInfo.title}</div>
+                                </div>
                             </div>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-4xl lg:text-5xl font-mono font-bold text-white tracking-tighter">
-                                    {formatHoursMins(todayDurationMs)}
-                                </span>
-                                <span className="text-sm font-medium text-slate-500">
-                                    / {targetHours}h target
-                                </span>
+
+                            {/* Level Progress */}
+                            <div className="mb-2">
+                                <div className="flex justify-between text-xs mb-1.5 font-medium">
+                                    <span className="text-slate-300">{levelData.currentXP.toLocaleString()} XP</span>
+                                    <span className="text-slate-500">Next: {levelData.xpForNextLevel.toLocaleString()} XP</span>
+                                </div>
+                                <div className="h-3 w-full bg-slate-800/50 rounded-full overflow-hidden border border-white/5 relative">
+                                    <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${levelData.progressPercent}%` }}
+                                        transition={{ duration: 1.5, ease: "easeOut" }}
+                                        className={`h-full bg-gradient-to-r from-${accent}-600 to-${accent}-400 relative overflow-hidden`}
+                                    >
+                                        <div className="absolute inset-0 bg-white/20 animate-[pulse_2s_infinite]" />
+                                        {/* Sparkles */}
+                                        <div className="absolute top-0 right-0 h-full w-4 bg-white/50 blur-md transform skew-x-12 translate-x-4 animate-[shimmer_2s_infinite]" />
+                                    </motion.div>
+                                </div>
+                                <div className="mt-1 text-[10px] text-slate-500 text-right">
+                                    {levelData.xpRemaining.toLocaleString()} XP to Level {levelData.nextLevel}
+                                </div>
                             </div>
-                            {/* Growth Indicator */}
-                            <div className="mt-3 flex items-center gap-2 text-xs">
-                                {todayDurationMs > 0 && yesterdayDurationMs > 0 ? (
-                                    <>
-                                        {growthPercent >= 0 ? (
-                                            <span className="text-emerald-400 flex items-center font-bold bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/10">
-                                                <ArrowUpRight size={12} className="mr-1" /> {Math.abs(growthPercent).toFixed(0)}%
-                                            </span>
-                                        ) : (
-                                            <span className="text-rose-400 flex items-center font-bold bg-rose-500/10 px-2 py-1 rounded-md border border-rose-500/10">
-                                                <ArrowDownRight size={12} className="mr-1" /> {Math.abs(growthPercent).toFixed(0)}%
-                                            </span>
-                                        )}
-                                        <span className="text-slate-500">vs yesterday</span>
-                                    </>
-                                ) : (
-                                    <span className="text-slate-500 italic">Start tracking to see trends</span>
-                                )}
-                            </div>
-                        </div>
-                        
-                        <div className="relative w-20 h-20 hidden sm:flex items-center justify-center">
-                            <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                                <path className="text-white/5" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-                                <motion.path 
-                                    initial={{ strokeDasharray: "0, 100" }}
-                                    animate={{ strokeDasharray: `${progressPercent}, 100` }}
-                                    transition={{ duration: 1.5, ease: "easeInOut" }}
-                                    className={`text-${accent}-500 drop-shadow-[0_0_15px_rgba(var(--color-${accent}-500),0.6)]`}
-                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" 
-                                    fill="none" 
-                                    stroke="currentColor" 
-                                    strokeWidth="3" 
-                                    strokeLinecap="round"
-                                />
-                            </svg>
-                            <span className="absolute text-xs font-bold text-white">{Math.round(progressPercent)}%</span>
                         </div>
                     </div>
 
-                    <div className="relative z-10 mt-6">
-                        <div className="flex items-center gap-3">
-                            <motion.button 
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={() => !isDayCompleted && onNavigate('timer')}
-                                disabled={isDayCompleted}
-                                className={`
-                                    flex-1 py-3.5 px-6 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all
-                                    ${isDayCompleted 
-                                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5' 
-                                        : `bg-gradient-to-r from-${accent}-600 to-${accent}-500 hover:from-${accent}-500 hover:to-${accent}-400 text-white shadow-lg shadow-${accent}-500/25 border border-${accent}-400/20`}
-                                `}
-                            >
-                                <Zap size={18} fill="currentColor" /> {isDayCompleted ? 'Day Complete' : 'Start Focus Session'}
-                            </motion.button>
-                            <motion.button 
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={() => onNavigate('timeline')}
-                                className="p-3.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-300 hover:text-white transition-colors border border-white/10"
-                            >
-                                <BarChart2 size={22} />
-                            </motion.button>
-                        </div>
+                    <div className="relative z-10 mt-4 flex items-center gap-3">
+                        <motion.button 
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => !isDayCompleted && onNavigate('timer')}
+                            disabled={isDayCompleted}
+                            className={`
+                                flex-1 py-3.5 px-6 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all
+                                ${isDayCompleted 
+                                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5' 
+                                    : `bg-gradient-to-r from-${accent}-600 to-${accent}-500 hover:from-${accent}-500 hover:to-${accent}-400 text-white shadow-lg shadow-${accent}-500/25 border border-${accent}-400/20`}
+                            `}
+                        >
+                            <Zap size={18} fill="currentColor" /> {isDayCompleted ? 'Day Complete' : 'Earn XP'}
+                        </motion.button>
+                        <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => onNavigate('timeline')}
+                            className="p-3.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-300 hover:text-white transition-colors border border-white/10"
+                        >
+                            <BarChart2 size={22} />
+                        </motion.button>
                     </div>
                 </motion.div>
 
@@ -305,9 +323,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     variants={itemVariants}
                     className="col-span-1 bg-slate-900/40 backdrop-blur-md border border-white/10 rounded-[2rem] p-5 flex flex-col justify-between relative overflow-hidden hover:border-white/20 transition-colors"
                 >
-                    <div className="flex items-center gap-2 mb-2 relative z-10">
-                        <PieChart size={16} className="text-blue-400" />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Today's Mix</span>
+                    <div className="flex items-center justify-between mb-2 relative z-10">
+                        <div className="flex items-center gap-2">
+                            <PieChart size={16} className="text-blue-400" />
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Daily Mix</span>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-slate-300">{formatHoursMins(todayDurationMs)}</span>
                     </div>
                     
                     <div className="flex-1 flex items-center justify-center relative z-10 min-h-[120px]">

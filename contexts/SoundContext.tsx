@@ -51,6 +51,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [customSounds, setCustomSounds] = useState<SoundOption[]>([]);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fxRef = useRef<HTMLAudioElement | null>(null);
 
   // Initialize Audio Object & Load Custom Sounds
   useEffect(() => {
@@ -58,6 +59,10 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     audioRef.current.loop = true;
     audioRef.current.crossOrigin = "anonymous"; // Try anonymous for CORS
     
+    // SFX for XP
+    fxRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3');
+    fxRef.current.volume = 0.4;
+
     // Error handling
     audioRef.current.onerror = (e) => {
         console.error("Audio Playback Error", audioRef.current?.error);
@@ -70,11 +75,20 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     
     loadCustomSounds();
 
+    const handleXpGained = () => {
+        if (fxRef.current) {
+            fxRef.current.currentTime = 0;
+            fxRef.current.play().catch(e => console.log("SFX play failed", e));
+        }
+    };
+    window.addEventListener('ekagra_xp_gained', handleXpGained);
+
     return () => {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
       }
+      window.removeEventListener('ekagra_xp_gained', handleXpGained);
     };
   }, []);
 

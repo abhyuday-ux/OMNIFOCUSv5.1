@@ -129,6 +129,8 @@ export interface UserProfile {
   email: string;
   photoURL?: string;
   totalFocusMs: number; // Lifetime focus time
+  xp?: number; // Total Experience Points
+  level?: number; // Current Level
   lastActive: number;
 }
 

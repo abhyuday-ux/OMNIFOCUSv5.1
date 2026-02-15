@@ -18,6 +18,8 @@ import { LoginPage } from './components/LoginPage';
 import { ExamList } from './components/ExamList';
 import { SocialPanel } from './components/SocialPanel';
 import { UsernameSetup } from './components/UsernameSetup';
+import { LevelUpModal } from './components/LevelUpModal';
+import { FriendObserver } from './components/FriendObserver';
 import { useAuth } from './contexts/AuthContext'; 
 import { dbService } from './services/db';
 import { useSound } from './contexts/SoundContext';
@@ -144,6 +146,9 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [usernameNeeded, setUsernameNeeded] = useState(false);
   
+  // Level Up State
+  const [levelUpData, setLevelUpData] = useState<{ show: boolean; level: number }>({ show: false, level: 1 });
+
   // Timer Config
   const [timerDurations, setTimerDurations] = useState<TimerDurations>(DEFAULT_DURATIONS);
   
@@ -167,7 +172,6 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MobileTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isSubjectManagerOpen, setIsSubjectManagerOpen] = useState(false);
-  const [isSocialPanelOpen, setIsSocialPanelOpen] = useState(false); // Social Panel State
   const [confirmModal, setConfirmModal] = useState<{ type: 'today' | 'all'; title: string; message: string; } | null>(null);
   
   // Focus Panel State
@@ -245,6 +249,12 @@ const App: React.FC = () => {
     };
     window.addEventListener('ekagrazone_sync_complete', handleSyncComplete);
 
+    const handleLevelUp = (e: CustomEvent) => {
+        setLevelUpData({ show: true, level: e.detail.level });
+    };
+    // Cast to EventListener to satisfy TS with CustomEvent
+    window.addEventListener('ekagra_levelup', handleLevelUp as EventListener);
+
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -256,6 +266,7 @@ const App: React.FC = () => {
 
     return () => {
       window.removeEventListener('ekagrazone_sync_complete', handleSyncComplete);
+      window.removeEventListener('ekagra_levelup', handleLevelUp as EventListener);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -768,7 +779,7 @@ const App: React.FC = () => {
       { id: 'habits', label: 'Habits', icon: Repeat },
       { id: 'journal', label: 'Journal', icon: BookOpen },
       { id: 'calendar', label: 'Plan', icon: CalendarDays },
-      { id: 'social', label: 'Social', icon: Users }, // Added Social tab
+      { id: 'social', label: 'Arena', icon: Users }, 
       { id: 'settings', label: 'Settings', icon: Settings },
     ];
 
@@ -791,25 +802,6 @@ const App: React.FC = () => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
                 
-                // Special handler for Social which opens the panel but keeps the active tab mostly or just serves as a trigger
-                if (tab.id === 'social') {
-                    return (
-                        <button
-                            key={tab.id}
-                            onClick={() => setIsSocialPanelOpen(!isSocialPanelOpen)}
-                            className={`
-                                w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-300 group relative
-                                ${isSocialPanelOpen ? 'bg-white/10 text-white shadow-lg border border-white/5' : 'text-slate-400 hover:text-white hover:bg-white/10'}
-                            `}
-                        >
-                            <div className="flex justify-center xl:w-6 flex-none">
-                                <Icon size={20} className={`transition-transform duration-300 ${isSocialPanelOpen ? `scale-110 text-${accent}-400` : 'group-hover:scale-110'}`} />
-                            </div>
-                            <span className="hidden xl:block text-sm font-medium tracking-wide opacity-90">{tab.label}</span>
-                        </button>
-                    )
-                }
-
                 return (
                 <button
                     key={tab.id}
@@ -877,6 +869,9 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans overflow-hidden selection:bg-cyan-500/30 relative">
       
+      {/* Friend Milestone Observer */}
+      {!isGuest && <FriendObserver />}
+
       {/* Background Ambience */}
       {!isZenActive && !isSpaceMode && (
           <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
@@ -990,6 +985,13 @@ const App: React.FC = () => {
       )}
 
       <ConfirmationModal />
+      
+      {/* Level Up Modal */}
+      <AnimatePresence>
+          {levelUpData.show && (
+              <LevelUpModal newLevel={levelUpData.level} onClose={() => setLevelUpData({ ...levelUpData, show: false })} />
+          )}
+      </AnimatePresence>
 
       {/* --- Mobile Layout (< md) --- */}
       <div className={`md:hidden flex flex-col h-[100dvh] relative z-10 ${isZenActive || isSpaceMode ? 'hidden' : ''}`}>
@@ -1112,20 +1114,6 @@ const App: React.FC = () => {
                 ${activeTab === 'calendar' ? 'p-0 rounded-[2rem]' : 'p-8 rounded-[2.5rem]'}
             `}
          >
-            {/* Social Panel Container */}
-            <AnimatePresence>
-                {isSocialPanelOpen && (
-                    <motion.div 
-                        initial={{ width: 0, opacity: 0 }}
-                        animate={{ width: 'auto', opacity: 1 }}
-                        exit={{ width: 0, opacity: 0 }}
-                        className="flex-none h-full z-40 overflow-hidden relative border-r border-white/5"
-                    >
-                        <SocialPanel onClose={() => setIsSocialPanelOpen(false)} />
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
             {/* Content Area */}
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Top Bar inside glass */}
@@ -1142,6 +1130,7 @@ const App: React.FC = () => {
                         {activeTab === 'timeline' && 'Analytics'}
                         {activeTab === 'journal' && 'Daily Journal'}
                         {activeTab === 'habits' && 'Habit Forge'}
+                        {activeTab === 'social' && 'Social Hub'}
                         {activeTab === 'settings' && 'Preferences'}
                         {activeTab === 'dashboard' && <span className="text-sm font-normal text-slate-400 bg-white/5 px-3 py-1 rounded-full border border-white/5 backdrop-blur-sm">
                             {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
@@ -1271,6 +1260,12 @@ const App: React.FC = () => {
                             {activeTab === 'timeline' && (
                                 <div className="h-full w-full overflow-hidden">
                                     <StatsPage sessions={allSessions} subjects={subjects} onDataUpdate={loadSessions} />
+                                </div>
+                            )}
+
+                            {activeTab === 'social' && (
+                                <div className="h-full w-full overflow-hidden rounded-[2rem]">
+                                    <SocialPanel />
                                 </div>
                             )}
 

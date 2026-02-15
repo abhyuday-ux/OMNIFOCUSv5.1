@@ -1,499 +1,483 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { dbService } from '../services/db';
-import { Friend, UserProfile, StudySession, Subject, isHexColor, getLocalDateString } from '../types';
+import { Friend, UserProfile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
-import { Users, Search, UserPlus, Trophy, X, Check, Mail, Activity, Circle, PieChart } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Users, Search, UserPlus, Trophy, X, Check, Activity, Crown, Zap, Globe, Loader2, AlertCircle } from 'lucide-react';
 import { rtdb } from '../services/firebase';
-import { ref, onValue, off } from 'firebase/database';
-
-// --- Helper Components ---
-
-const StatusIndicator: React.FC<{ isOnline?: boolean; isFocusing?: boolean }> = ({ isOnline, isFocusing }) => {
-    if (isFocusing) {
-        return (
-            <div className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500 border border-slate-900"></span>
-            </div>
-        );
-    }
-    if (isOnline) {
-        return <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />;
-    }
-    return <div className="h-2 w-2 rounded-full border border-slate-600" />;
-};
+import { ref, onValue, off, query, orderByChild, limitToLast } from 'firebase/database';
+import { getRankInfo } from '../utils/xp';
 
 const formatDuration = (ms: number) => {
-    const hours = Math.floor(ms / 3600000);
-    const minutes = Math.floor((ms % 3600000) / 60000);
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (h === 0) return `${m}m`;
+    return `${h}h ${m}m`;
 };
 
-// Isolated Row Component to prevent full list re-renders on ticker
 const FriendRow: React.FC<{ 
-    friend: Friend; 
-    rank: number; 
-    onClick: () => void 
-}> = ({ friend, rank, onClick }) => {
-    const [liveTime, setLiveTime] = useState<number>(0);
+    profile: UserProfile; 
+    rank: number | string; 
+    isMe: boolean;
+    onClick: () => void;
+    showStatus?: boolean;
+    subtitle?: string; 
+}> = ({ profile, rank, isMe, onClick, showStatus = true, subtitle }) => {
     const [isFocusing, setIsFocusing] = useState(false);
-    const [isOnline, setIsOnline] = useState(false);
-    const [currentTask, setCurrentTask] = useState<string>('');
+    const rankInfo = getRankInfo(profile.level || 1);
 
-    // Local RTDB Listener for this specific friend
     useEffect(() => {
-        const statusRef = ref(rtdb, `users/${friend.uid}/publicStatus`);
-        
+        if (!showStatus) return;
+        const statusRef = ref(rtdb, `users/${profile.uid}/publicStatus`);
         const handleUpdate = (snapshot: any) => {
             const val = snapshot.val();
-            if (val) {
-                setIsOnline(val.isOnline);
-                setIsFocusing(val.isFocusing);
-                setCurrentTask(val.currentTask || '');
-                
-                // Base time from completed sessions
-                let total = val.todayBaseMs || (val.todayFocusMinutes * 60000) || 0;
-                
-                // If actively running, add elapsed time since start
-                if (val.isFocusing && val.currentSessionStart) {
-                    const elapsed = Math.max(0, Date.now() - val.currentSessionStart);
-                    total += elapsed;
-                }
-                setLiveTime(total);
-            } else {
-                // Default fallback if no RTDB data (offline/new user)
-                setIsOnline(false);
-                setIsFocusing(false);
-                setCurrentTask('');
-                setLiveTime(friend.profile?.totalFocusMs || 0); 
-            }
+            setIsFocusing(val ? val.isFocusing : false);
         };
-
         onValue(statusRef, handleUpdate);
         return () => off(statusRef);
-    }, [friend.uid]);
-
-    // Local Ticker for smooth animation if focusing
-    useEffect(() => {
-        if (!isFocusing) return;
-        const interval = setInterval(() => {
-            setLiveTime(prev => prev + 1000);
-        }, 1000);
-        return () => clearInterval(interval);
-    }, [isFocusing]);
+    }, [profile.uid, showStatus]);
 
     return (
         <motion.div 
-            layout // Framer Motion layout prop for smooth reordering
+            layout 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             onClick={onClick}
             className={`
-                flex items-center justify-between p-3 rounded-xl border border-white/5 cursor-pointer
-                bg-white/[0.02] hover:bg-white/5 transition-colors group
-                ${rank === 1 ? 'border-amber-500/20 bg-amber-500/5' : ''}
+                flex items-center justify-between px-4 py-3 rounded-2xl cursor-pointer
+                transition-all group relative border
+                ${isMe 
+                    ? 'bg-gradient-to-r from-indigo-500/10 to-indigo-500/5 border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.1)]' 
+                    : 'bg-white/[0.03] border-white/5 hover:bg-white/5 hover:border-white/10'}
             `}
         >
-            <div className="flex items-center gap-4">
-                <span className={`
-                    w-6 text-center text-xs font-mono font-bold 
-                    ${rank === 1 ? 'text-amber-400' : rank === 2 ? 'text-slate-300' : rank === 3 ? 'text-orange-400' : 'text-slate-600'}
+            <div className="flex items-center gap-4 min-w-0 flex-1">
+                <div className={`
+                    w-8 text-center font-mono font-bold text-lg flex-none flex items-center justify-center
+                    ${rank === 1 ? 'text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' 
+                    : rank === 2 ? 'text-slate-300' 
+                    : rank === 3 ? 'text-orange-400' 
+                    : 'text-slate-600'}
                 `}>
-                    #{rank}
-                </span>
+                    {rank === 1 ? <Crown size={20} className="fill-amber-400/20" /> : rank === 2 ? <Crown size={18} className="text-slate-300 fill-slate-300/20" /> : rank === 3 ? <Crown size={18} className="text-orange-400 fill-orange-400/20" /> : rank}
+                </div>
                 
-                <div className="relative">
-                    {friend.profile?.photoURL ? (
-                        <img src={friend.profile.photoURL} className="w-10 h-10 rounded-xl object-cover bg-slate-800" />
+                <div className="relative flex-none">
+                    <div className={`absolute -inset-1 bg-emerald-500/30 rounded-full blur-md transition-opacity duration-500 ${isFocusing ? 'opacity-100 animate-pulse' : 'opacity-0'}`} />
+                    {profile.photoURL ? (
+                        <img src={profile.photoURL} className={`w-10 h-10 rounded-full object-cover bg-slate-800 relative z-10 border-2 ${isFocusing ? 'border-emerald-500' : 'border-transparent'}`} alt={profile.displayName} />
                     ) : (
-                        <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
-                            {friend.profile?.displayName?.[0] || '?'}
+                        <div className={`w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 relative z-10 border-2 ${isFocusing ? 'border-emerald-500' : 'border-transparent'}`}>
+                            {profile.displayName?.[0]}
                         </div>
                     )}
-                    <div className="absolute -bottom-1 -right-1">
-                        <StatusIndicator isOnline={isOnline} isFocusing={isFocusing} />
-                    </div>
+                    {isFocusing && (
+                        <div className="absolute -bottom-1 -right-1 z-20 bg-slate-900 rounded-full p-0.5">
+                            <div className="bg-emerald-500 rounded-full p-0.5 animate-bounce">
+                                <Zap size={8} fill="white" className="text-white" />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                <div>
-                    <h4 className="font-bold text-sm text-slate-200 group-hover:text-white transition-colors">
-                        {friend.profile?.displayName || 'Unknown'}
-                    </h4>
-                    <p className={`text-[10px] font-mono truncate max-w-[100px] ${isFocusing ? 'text-blue-400 animate-pulse' : 'text-slate-500'}`}>
-                        {isFocusing ? `Focusing: ${currentTask}` : `@${friend.profile?.username}`}
-                    </p>
+                <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                        <h4 className={`font-bold text-sm truncate ${isMe ? 'text-white' : 'text-slate-300'}`}>
+                            {profile.displayName || 'Unknown'}
+                        </h4>
+                        {isMe && <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded font-medium border border-indigo-500/20">YOU</span>}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                        {subtitle ? (
+                            <span className="text-[10px] text-slate-500">{subtitle}</span>
+                        ) : (
+                            <>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${rankInfo.bg} ${rankInfo.color} ${rankInfo.border} uppercase tracking-wider`}>
+                                    {rankInfo.title}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">Lvl {profile.level || 1}</span>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
-            <div className="text-right">
-                <div className={`text-sm font-mono font-bold ${isFocusing ? 'text-blue-400' : 'text-slate-300'}`}>
-                    {formatDuration(liveTime)}
+            <div className="text-right flex-none pl-3">
+                <div className={`text-sm font-mono font-bold ${isFocusing ? 'text-emerald-400' : 'text-slate-300'}`}>
+                    {(profile.xp || 0).toLocaleString()} <span className="text-[10px] text-slate-500 font-sans">XP</span>
                 </div>
-                <div className="text-[9px] text-slate-500 font-medium uppercase tracking-wider">
-                    {isFocusing ? 'Live' : 'Today'}
-                </div>
+                {isFocusing && (
+                    <div className="text-[9px] text-emerald-500 font-bold uppercase tracking-wider animate-pulse flex items-center justify-end gap-1">
+                        Live <Activity size={8} />
+                    </div>
+                )}
             </div>
         </motion.div>
     );
 };
 
-// --- Main Component ---
-
-interface SocialPanelProps {
-    onClose?: () => void;
-}
-
-export const SocialPanel: React.FC<SocialPanelProps> = ({ onClose }) => {
-    const { currentUser } = useAuth();
+export const SocialPanel: React.FC = () => {
+    const { currentUser, isGuest } = useAuth();
     const { accent } = useTheme();
-    const [friends, setFriends] = useState<Friend[]>([]);
-    const [activeTab, setActiveTab] = useState<'leaderboard' | 'requests' | 'add'>('leaderboard');
+    const [activeTab, setActiveTab] = useState<'global' | 'friends'>('global');
     
-    // Search
+    // Data States
+    const [leaderboardUsers, setLeaderboardUsers] = useState<UserProfile[]>([]);
+    const [friends, setFriends] = useState<Friend[]>([]);
+    
+    // Add Friend UI State
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResult, setSearchResult] = useState<UserProfile | null>(null);
     const [searchLoading, setSearchLoading] = useState(false);
     const [requestSent, setRequestSent] = useState(false);
+    const [searchError, setSearchError] = useState('');
 
     // Detail View
-    const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
-    const [friendSessions, setFriendSessions] = useState<StudySession[]>([]);
-    const [friendSubjects, setFriendSubjects] = useState<Subject[]>([]);
-    const [detailsLoading, setDetailsLoading] = useState(false);
+    const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+    const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
 
-    // Subscribe to Friends List (Firestore)
+    // Load My Profile
     useEffect(() => {
-        const unsubscribe = dbService.subscribeToFriends((updatedFriends) => {
-            setFriends(updatedFriends);
+        if (isGuest) return;
+        const loadMyProfile = async () => {
+            const profile = await dbService.getUserProfile();
+            setCurrentUserProfile(profile);
+        };
+        loadMyProfile();
+    }, [isGuest]);
+
+    // RTDB Leaderboard Subscription
+    useEffect(() => {
+        if (isGuest || activeTab !== 'global') return;
+
+        // Query: users sorted by stats/totalXP, limit to last 10 (highest)
+        const leaderboardQuery = query(ref(rtdb, 'users'), orderByChild('stats/totalXP'), limitToLast(10));
+
+        const handleSnapshot = (snapshot: any) => {
+            const users: UserProfile[] = [];
+            snapshot.forEach((childSnap: any) => {
+                const uid = childSnap.key;
+                const stats = childSnap.val().stats;
+                if (stats) {
+                    users.push({
+                        uid,
+                        displayName: stats.displayName || 'Anonymous',
+                        photoURL: stats.photoURL,
+                        totalFocusMs: stats.totalFocusMs || 0,
+                        xp: stats.totalXP || 0,
+                        level: stats.level || 1,
+                        lastActive: 0, // Not strictly needed for leaderboard display
+                        email: '' // Not exposed
+                    });
+                }
+            });
+            // Reverse to show highest first
+            setLeaderboardUsers(users.reverse());
+        };
+
+        onValue(leaderboardQuery, handleSnapshot);
+        return () => off(leaderboardQuery);
+    }, [activeTab, isGuest]);
+
+    // Firestore Friends Subscription
+    useEffect(() => {
+        if (isGuest || activeTab !== 'friends') return;
+
+        const unsubFriends = dbService.subscribeToFriends((friendList) => {
+            setFriends(friendList);
         });
-        return () => { if (unsubscribe) unsubscribe(); };
-    }, []);
+
+        return () => {
+            if (unsubFriends) unsubFriends();
+        };
+    }, [activeTab, isGuest]);
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!searchQuery.trim()) return;
+        
         setSearchLoading(true);
         setSearchResult(null);
+        setSearchError('');
         setRequestSent(false);
+
         try {
             const user = await dbService.findUserByUsername(searchQuery.trim());
             if (user && user.uid !== currentUser?.uid) {
                 setSearchResult(user);
+            } else if (user?.uid === currentUser?.uid) {
+                setSearchError("That's you!");
             } else {
-                setSearchResult(null);
+                setSearchError("User not found.");
             }
-        } catch (e) { console.error(e); } 
-        finally { setSearchLoading(false); }
-    };
-
-    const sendRequest = async () => {
-        if (searchResult) {
-            await dbService.sendFriendRequest(searchResult.uid);
-            setRequestSent(true);
+        } catch (e) {
+            console.error(e);
+            setSearchError("Error searching.");
+        } finally {
+            setSearchLoading(false);
         }
     };
 
-    const acceptRequest = async (uid: string) => {
+    const handleAddFriend = async () => {
+        if (!searchResult) return;
+        await dbService.sendFriendRequest(searchResult.uid);
+        setRequestSent(true);
+    };
+
+    const handleAcceptFriend = async (uid: string) => {
         await dbService.acceptFriendRequest(uid);
     };
 
-    const handleFriendClick = async (friend: Friend) => {
-        setSelectedFriend(friend);
-        setDetailsLoading(true);
-        
-        try {
-            const today = getLocalDateString();
-            const [sessions, subjects] = await Promise.all([
-                dbService.getFriendSessions(friend.uid, today),
-                dbService.getFriendSubjects(friend.uid)
-            ]);
-            
-            setFriendSessions(sessions);
-            setFriendSubjects(subjects);
-        } catch (e) {
-            console.error("Error loading details", e);
-        } finally {
-            setDetailsLoading(false);
-        }
-    };
+    // Filter Accepted Friends
+    const acceptedFriends = friends.filter(f => f.status === 'accepted' && f.profile);
+    const pendingRequests = friends.filter(f => f.status === 'pending_received' && f.profile);
 
-    const acceptedFriends = friends.filter(f => f.status === 'accepted');
-    const pendingRequests = friends.filter(f => f.status === 'pending_received');
-
-    // Sort by totalFocusMs as a baseline for stability
-    const sortedFriends = [...acceptedFriends].sort((a, b) => (b.profile?.totalFocusMs || 0) - (a.profile?.totalFocusMs || 0));
-
-    // Calculate Breakdown Data for Modal
-    const subjectBreakdown = useMemo(() => {
-        const stats: Record<string, number> = {};
-        friendSessions.forEach(s => {
-            stats[s.subjectId] = (stats[s.subjectId] || 0) + s.durationMs;
-        });
-        
-        return Object.entries(stats).map(([id, ms]) => {
-            const subject = friendSubjects.find(sub => sub.id === id);
-            return {
-                id,
-                name: subject?.name || id, // Fallback to ID if custom subject missing, or we could capitalize
-                color: subject?.color || '#64748b',
-                ms
-            };
-        }).sort((a, b) => b.ms - a.ms);
-    }, [friendSessions, friendSubjects]);
+    // Sort Friends by XP descending
+    const sortedFriends = [...acceptedFriends].sort((a, b) => (b.profile?.xp || 0) - (a.profile?.xp || 0));
 
     return (
-        <div className="h-full flex flex-col bg-slate-900/60 backdrop-blur-xl border-l border-white/10 w-full md:w-96 shadow-2xl relative overflow-hidden">
-            {/* Header */}
-            <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-900/80">
-                <div className="flex items-center gap-3">
-                    <div className={`p-2 bg-${accent}-500/20 rounded-xl text-${accent}-400`}>
-                        <Users size={20} />
-                    </div>
-                    <div>
-                        <h2 className="font-bold text-white text-sm uppercase tracking-wide">Mission Control</h2>
-                        <p className="text-[10px] text-slate-500 font-mono">Friends & Status</p>
-                    </div>
+        <div className="flex flex-col h-full bg-slate-900/40 backdrop-blur-md rounded-3xl overflow-hidden relative border border-white/5">
+            
+            {/* Main Header */}
+            <div className="p-6 border-b border-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/50 flex-none">
+                <div>
+                    <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                        Social Hub
+                    </h2>
+                    <p className="text-sm text-slate-400">Connect, Compete, Conquer.</p>
                 </div>
-                {onClose && (
-                    <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors">
-                        <X size={18} />
+                
+                <div className="flex bg-slate-800/50 p-1 rounded-xl border border-white/5">
+                    <button 
+                        onClick={() => setActiveTab('global')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'global' ? `bg-${accent}-600 text-white shadow-lg` : 'text-slate-400 hover:text-white'}`}
+                    >
+                        <Globe size={14} /> Global Arena
                     </button>
-                )}
-            </div>
-
-            {/* Navigation */}
-            <div className="px-4 py-3 bg-slate-950/30 border-b border-white/5">
-                <div className="flex p-1 bg-slate-800/50 rounded-lg border border-white/5">
-                    {[
-                        { id: 'leaderboard', icon: Trophy, label: 'Board' },
-                        { id: 'requests', icon: Mail, label: 'Req', count: pendingRequests.length },
-                        { id: 'add', icon: UserPlus, label: 'Add' }
-                    ].map(tab => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id as any)}
-                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all relative ${activeTab === tab.id ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-                        >
-                            <tab.icon size={12} />
-                            {tab.label}
-                            {tab.count ? (
-                                <span className="bg-rose-500 text-white text-[9px] px-1 rounded-full">{tab.count}</span>
-                            ) : null}
-                        </button>
-                    ))}
+                    <button 
+                        onClick={() => setActiveTab('friends')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'friends' ? `bg-${accent}-600 text-white shadow-lg` : 'text-slate-400 hover:text-white'}`}
+                    >
+                        <Users size={14} /> Friends
+                    </button>
                 </div>
             </div>
 
-            {/* Content Area */}
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
+            <div className="flex-1 overflow-hidden relative">
                 <AnimatePresence mode="wait">
                     
-                    {/* DETAIL POPUP (Breakdown) */}
-                    {selectedFriend ? (
+                    {/* User Detail Overlay */}
+                    {selectedUser && (
                         <motion.div 
                             key="detail"
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-xl p-6 flex flex-col overflow-hidden"
+                            className="absolute inset-0 z-50 bg-slate-900/95 backdrop-blur-xl p-8 flex flex-col items-center justify-center"
                         >
-                            <div className="flex justify-end">
-                                <button onClick={() => setSelectedFriend(null)} className="p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors">
-                                    <X size={20} />
-                                </button>
-                            </div>
+                            <button onClick={() => setSelectedUser(null)} className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors">
+                                <X size={24} />
+                            </button>
                             
-                            <div className="text-center mb-8">
-                                <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-3xl font-bold border-2 border-indigo-500/30 shadow-[0_0_30px_rgba(99,102,241,0.2)] mb-4 overflow-hidden relative">
-                                    {selectedFriend.profile?.photoURL ? (
-                                        <img src={selectedFriend.profile.photoURL} className="w-full h-full object-cover" />
+                            <div className="w-full max-w-md bg-slate-800/50 border border-white/10 rounded-3xl p-8 text-center relative overflow-hidden">
+                                <div className={`absolute top-0 inset-x-0 h-1 bg-${accent}-500 opacity-50`} />
+                                
+                                <div className="w-24 h-24 mx-auto rounded-full bg-slate-700 p-1 border-4 border-slate-600 shadow-xl mb-4 relative">
+                                    {selectedUser.photoURL ? (
+                                        <img src={selectedUser.photoURL} className="w-full h-full rounded-full object-cover" alt={selectedUser.displayName} />
                                     ) : (
-                                        selectedFriend.profile?.displayName?.[0]
+                                        <div className="w-full h-full rounded-full bg-slate-600 flex items-center justify-center text-2xl font-bold text-slate-300">
+                                            {selectedUser.displayName?.[0]}
+                                        </div>
                                     )}
-                                    {/* Online/Focus Status Ring */}
-                                    <div className={`absolute inset-0 border-2 rounded-3xl ${selectedFriend.rtStatus?.isFocusing ? 'border-blue-500 animate-pulse' : selectedFriend.rtStatus?.isOnline ? 'border-emerald-500' : 'border-transparent'}`} />
-                                </div>
-                                <h3 className="text-2xl font-bold text-white tracking-tight">{selectedFriend.profile?.displayName}</h3>
-                                <p className="text-xs text-slate-500 font-mono mt-1">@{selectedFriend.profile?.username}</p>
-                            </div>
-
-                            <div className="bg-slate-900/80 p-5 rounded-2xl border border-white/10 shadow-xl flex-1 flex flex-col">
-                                <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
-                                    <PieChart size={16} className="text-indigo-400"/>
-                                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Today's Focus Breakdown</h4>
+                                    <div className="absolute -bottom-2 -right-2 bg-slate-900 text-amber-400 border border-slate-700 p-1.5 rounded-full">
+                                        <Crown size={16} fill="currentColor" />
+                                    </div>
                                 </div>
                                 
-                                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
-                                    {detailsLoading ? (
-                                        <div className="flex justify-center items-center h-20">
-                                            <div className="w-5 h-5 border-2 border-slate-500 border-t-white rounded-full animate-spin"></div>
-                                        </div>
-                                    ) : subjectBreakdown.length === 0 ? (
-                                        <div className="text-center py-8 text-slate-600 text-xs italic border border-dashed border-white/5 rounded-xl">
-                                            No recorded sessions today.
-                                        </div>
-                                    ) : (
-                                        <div className="w-full">
-                                            <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase mb-2 px-2">
-                                                <div className="col-span-8">Subject</div>
-                                                <div className="col-span-4 text-right">Time</div>
-                                            </div>
-                                            {subjectBreakdown.map((item) => {
-                                                const isHex = isHexColor(item.color);
-                                                return (
-                                                    <div key={item.id} className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors border border-white/5">
-                                                        <div className="col-span-8 flex items-center gap-3 overflow-hidden">
-                                                            <div 
-                                                                className={`w-2 h-2 rounded-full flex-none shadow-[0_0_8px_currentColor] ${!isHex ? item.color : ''}`} 
-                                                                style={isHex ? { backgroundColor: item.color, color: item.color } : {}}
-                                                            />
-                                                            <span className="text-sm font-medium text-slate-200 truncate">{item.name}</span>
-                                                        </div>
-                                                        <div className="col-span-4 text-right font-mono font-bold text-indigo-300 text-xs">
-                                                            {formatDuration(item.ms)}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
+                                <h3 className="text-2xl font-bold text-white mb-1">{selectedUser.displayName}</h3>
+                                <p className="text-slate-400 text-sm font-mono mb-6">@{selectedUser.username || 'user'}</p>
+                                
+                                <div className="grid grid-cols-2 gap-4 text-left">
+                                    <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total XP</p>
+                                        <p className="text-xl font-mono font-bold text-emerald-400">{(selectedUser.xp || 0).toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total Time</p>
+                                        <p className="text-xl font-mono font-bold text-blue-400">{formatDuration(selectedUser.totalFocusMs || 0)}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="mt-6 pt-6 border-t border-white/5">
+                                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/5 text-sm font-medium text-slate-300">
+                                        <Trophy size={14} className="text-amber-400" />
+                                        Rank: <span className="text-white font-bold">{getRankInfo(selectedUser.level || 1).title}</span>
+                                    </div>
                                 </div>
                             </div>
                         </motion.div>
-                    ) : (
-                        
-                        /* LIST VIEWS (Leaderboard etc.) */
-                        <>
-                            {activeTab === 'leaderboard' && (
-                                <motion.div 
-                                    key="leaderboard"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    className="space-y-2"
-                                >
-                                    <LayoutGroup>
-                                        {sortedFriends.length === 0 ? (
-                                            <div className="text-center py-10 opacity-50">
-                                                <Trophy size={40} className="mx-auto mb-2 text-slate-600" />
-                                                <p className="text-xs text-slate-400">Add friends to compete.</p>
-                                            </div>
-                                        ) : (
-                                            sortedFriends.map((friend, i) => (
-                                                <FriendRow 
-                                                    key={friend.uid} 
-                                                    friend={friend} 
-                                                    rank={i + 1}
-                                                    onClick={() => handleFriendClick(friend)}
-                                                />
-                                            ))
-                                        )}
-                                    </LayoutGroup>
-                                </motion.div>
-                            )}
+                    )}
 
-                            {activeTab === 'requests' && (
-                                <motion.div 
-                                    key="requests"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    className="space-y-3"
-                                >
-                                    {pendingRequests.length === 0 ? (
-                                        <div className="text-center py-10 opacity-50">
-                                            <Mail size={40} className="mx-auto mb-2 text-slate-600" />
-                                            <p className="text-xs text-slate-400">No pending requests.</p>
+                    {/* GLOBAL TAB */}
+                    {activeTab === 'global' && (
+                        <motion.div 
+                            key="global"
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="h-full overflow-y-auto px-6 pb-6 custom-scrollbar"
+                        >
+                            <div className="max-w-3xl mx-auto space-y-2 pt-4">
+                                {isGuest ? (
+                                    <div className="text-center py-20 opacity-50">
+                                        <p>Please sign in to view the global leaderboard.</p>
+                                    </div>
+                                ) : leaderboardUsers.length === 0 ? (
+                                    <div className="text-center py-20 opacity-50">
+                                        <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <Trophy size={24} className="text-slate-500" />
                                         </div>
-                                    ) : (
-                                        pendingRequests.map(req => (
-                                            <div key={req.uid} className="bg-white/5 p-4 rounded-xl border border-white/10">
-                                                <div className="flex items-center gap-3 mb-3">
-                                                    <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
-                                                        {req.profile?.displayName?.[0] || '?'}
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-bold text-slate-200">{req.profile?.displayName}</h4>
-                                                        <p className="text-xs text-slate-500">@{req.profile?.username}</p>
-                                                    </div>
-                                                </div>
-                                                <button 
-                                                    onClick={() => acceptRequest(req.uid)}
-                                                    className={`w-full py-2 bg-${accent}-600 hover:bg-${accent}-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2`}
-                                                >
-                                                    <Check size={14} /> Accept Request
-                                                </button>
-                                            </div>
-                                        ))
-                                    )}
-                                </motion.div>
-                            )}
+                                        <p className="text-xs text-slate-400 font-medium">Connecting to Arena...</p>
+                                    </div>
+                                ) : (
+                                    leaderboardUsers.map((user, i) => (
+                                        <FriendRow 
+                                            key={user.uid} 
+                                            profile={user} 
+                                            rank={i + 1}
+                                            isMe={user.uid === currentUser?.uid}
+                                            onClick={() => setSelectedUser(user)}
+                                        />
+                                    ))
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
 
-                            {activeTab === 'add' && (
-                                <motion.div 
-                                    key="add"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                >
-                                    <form onSubmit={handleSearch} className="mb-6">
-                                        <div className="relative">
+                    {/* FRIENDS TAB */}
+                    {activeTab === 'friends' && (
+                        <motion.div 
+                            key="friends"
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            className="h-full overflow-y-auto px-6 pb-6 custom-scrollbar"
+                        >
+                            <div className="max-w-3xl mx-auto space-y-8 pt-4">
+                                
+                                {/* Search Section */}
+                                <div className="bg-slate-800/30 p-4 rounded-2xl border border-white/5">
+                                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                        <UserPlus size={14} /> Add Friend
+                                    </h3>
+                                    <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+                                        <div className="relative flex-1">
                                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                                             <input 
-                                                className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-600"
-                                                placeholder="Search by @username..."
                                                 value={searchQuery}
-                                                onChange={e => setSearchQuery(e.target.value)}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                placeholder="Enter username (e.g. zen_master)"
+                                                className="w-full bg-slate-900 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
                                             />
                                         </div>
                                         <button 
-                                            type="submit"
-                                            disabled={!searchQuery || searchLoading}
-                                            className={`mt-2 w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs transition-colors`}
+                                            type="submit" 
+                                            disabled={searchLoading || !searchQuery.trim()}
+                                            className="px-4 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-300 font-bold text-sm transition-colors border border-white/5"
                                         >
-                                            {searchLoading ? 'Searching...' : 'Find User'}
+                                            {searchLoading ? <Loader2 className="animate-spin" size={18} /> : 'Search'}
                                         </button>
                                     </form>
 
+                                    {searchError && (
+                                        <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 p-3 rounded-xl">
+                                            <AlertCircle size={16} /> {searchError}
+                                        </div>
+                                    )}
+
                                     {searchResult && (
-                                        <div className="bg-slate-800/50 p-4 rounded-xl border border-white/10 text-center animate-in fade-in zoom-in-95">
-                                            <div className="w-16 h-16 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto mb-3 text-xl font-bold overflow-hidden">
-                                                {searchResult.photoURL ? (
-                                                    <img src={searchResult.photoURL} className="w-full h-full object-cover" />
-                                                ) : (
-                                                    searchResult.displayName[0]
-                                                )}
-                                            </div>
-                                            <h3 className="font-bold text-white text-lg">{searchResult.displayName}</h3>
-                                            <p className="text-xs text-slate-400 mb-4">@{searchResult.username}</p>
-                                            
-                                            {requestSent ? (
-                                                <div className="text-emerald-400 text-xs font-bold flex items-center justify-center gap-2 bg-emerald-500/10 py-2 rounded-lg">
-                                                    <Check size={14} /> Request Sent
+                                        <div className="flex items-center justify-between bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl animate-in fade-in slide-in-from-top-2">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-slate-300">
+                                                    {searchResult.displayName?.[0]}
                                                 </div>
+                                                <div>
+                                                    <div className="font-bold text-white text-sm">{searchResult.displayName}</div>
+                                                    <div className="text-[10px] text-indigo-300">Lvl {searchResult.level || 1}</div>
+                                                </div>
+                                            </div>
+                                            {requestSent ? (
+                                                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                                                    <Check size={14} /> Sent
+                                                </span>
                                             ) : (
                                                 <button 
-                                                    onClick={sendRequest}
-                                                    className={`w-full py-2 bg-${accent}-600 hover:bg-${accent}-500 text-white rounded-lg text-xs font-bold`}
+                                                    onClick={handleAddFriend}
+                                                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold"
                                                 >
-                                                    Send Friend Request
+                                                    Add
                                                 </button>
                                             )}
                                         </div>
                                     )}
+                                </div>
+
+                                {/* Requests Section */}
+                                {pendingRequests.length > 0 && (
+                                    <div>
+                                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Requests</h3>
+                                        <div className="space-y-2">
+                                            {pendingRequests.map(req => (
+                                                <div key={req.uid} className="flex items-center justify-between bg-slate-800/50 p-3 rounded-xl border border-white/5">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold">
+                                                            {req.profile?.displayName?.[0]}
+                                                        </div>
+                                                        <span className="text-sm font-bold text-slate-200">{req.profile?.displayName}</span>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => handleAcceptFriend(req.uid)}
+                                                        className="px-3 py-1.5 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
+                                                    >
+                                                        <Check size={14} /> Accept
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Friends List Section */}
+                                <div>
+                                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center justify-between">
+                                        <span>Your Friends</span>
+                                        <span className="bg-white/5 px-2 py-0.5 rounded-full">{acceptedFriends.length}</span>
+                                    </h3>
                                     
-                                    {!searchResult && !searchLoading && searchQuery && !requestSent && (
-                                        <div className="text-center text-slate-500 text-xs mt-4">
-                                            No user found. Try searching by username.
+                                    {sortedFriends.length === 0 ? (
+                                        <div className="text-center py-12 text-slate-500 text-sm border-2 border-dashed border-white/5 rounded-2xl">
+                                            No friends yet. Add someone above!
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {sortedFriends.map((friend, i) => (
+                                                <FriendRow 
+                                                    key={friend.uid}
+                                                    profile={friend.profile!}
+                                                    rank={i + 1}
+                                                    isMe={false}
+                                                    onClick={() => setSelectedUser(friend.profile!)}
+                                                />
+                                            ))}
                                         </div>
                                     )}
-                                </motion.div>
-                            )}
-                        </>
+                                </div>
+
+                            </div>
+                        </motion.div>
                     )}
                 </AnimatePresence>
             </div>

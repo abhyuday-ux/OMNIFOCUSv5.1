@@ -1,7 +1,9 @@
 
 import { StudySession, Subject, DEFAULT_SUBJECTS, DailyGoal, Task, Exam, ChatMessage, JournalEntry, CustomSound, UserProfile, Friend, FriendStatus } from '../types';
-import { db } from './firebase';
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe, query, where, updateDoc, increment, limit } from 'firebase/firestore';
+import { db, rtdb } from './firebase';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe, query, where, updateDoc, increment, limit, orderBy } from 'firebase/firestore';
+import { ref, update as rtdbUpdate, set as rtdbSet, serverTimestamp } from 'firebase/database';
+import { XP_PER_MINUTE, getLevelFromXP, getRankInfo } from '../utils/xp';
 
 const DB_NAME = 'EkagrazoneDB';
 const DB_VERSION = 8; 
@@ -106,6 +108,8 @@ class LocalDB {
                   if (change.type === 'removed') store.delete(change.doc.id);
               });
               tx.oncomplete = () => window.dispatchEvent(new Event('ekagrazone_sync_complete'));
+          }, (error) => {
+              console.warn(`Sync error for ${colName}:`, error.message);
           });
           this.unsubscribers.push(unsub);
       });
@@ -125,6 +129,8 @@ class LocalDB {
           }
           window.dispatchEvent(new Event('ekagrazone_sync_complete'));
           window.dispatchEvent(new Event('storage'));
+      }, (error) => {
+          console.warn("Settings sync error:", error.message);
       });
       this.unsubscribers.push(unsubSettings);
   }
@@ -139,22 +145,52 @@ class LocalDB {
   async ensureUserProfile() {
       if (!this.userId) return;
       const userRef = doc(db, 'user_profiles', this.userId);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) {
-          const sessions = await this.getAllSessions();
-          const totalTime = sessions.reduce((acc, s) => acc + s.durationMs, 0);
-          await setDoc(userRef, {
-              uid: this.userId,
-              totalFocusMs: totalTime,
-              lastActive: Date.now()
-          }, { merge: true });
+      try {
+        const snap = await getDoc(userRef);
+        if (!snap.exists()) {
+            const sessions = await this.getAllSessions();
+            const totalTime = sessions.reduce((acc, s) => acc + s.durationMs, 0);
+            const totalXP = Math.floor(totalTime / 60000) * XP_PER_MINUTE;
+            const level = getLevelFromXP(totalXP);
+            
+            await setDoc(userRef, {
+                uid: this.userId,
+                totalFocusMs: totalTime,
+                xp: totalXP,
+                level: level,
+                lastActive: Date.now()
+            }, { merge: true });
+        }
+      } catch (e) {
+          console.warn("Could not ensure user profile (likely permission issue):", e);
       }
   }
 
   async getUserProfile(): Promise<UserProfile | null> {
-      if (!this.userId) return null;
-      const snap = await getDoc(doc(db, 'user_profiles', this.userId));
-      return snap.exists() ? snap.data() as UserProfile : null;
+      if (!this.userId) {
+          // Guest Mode Profile - Retrieve from LocalStorage
+          const xp = parseInt(localStorage.getItem('ekagrazone_guest_xp') || '0');
+          const level = parseInt(localStorage.getItem('ekagrazone_guest_level') || '1');
+          const totalFocusMs = parseInt(localStorage.getItem('ekagrazone_guest_totalFocusMs') || '0');
+          
+          return {
+              uid: 'guest',
+              displayName: 'Guest',
+              email: '',
+              totalFocusMs,
+              xp,
+              level,
+              lastActive: Date.now()
+          };
+      }
+      
+      try {
+        const snap = await getDoc(doc(db, 'user_profiles', this.userId));
+        return snap.exists() ? snap.data() as UserProfile : null;
+      } catch (e) {
+          console.warn("Error getting user profile:", e);
+          return null;
+      }
   }
 
   // 1. Check Username Availability
@@ -182,18 +218,111 @@ class LocalDB {
       await batch.commit();
   }
 
-  // Update cumulative focus time
-  async updateUserFocusTime(addedDurationMs: number) {
-      if (!this.userId) return;
-      const userRef = doc(db, 'user_profiles', this.userId);
-      try {
-          await updateDoc(userRef, {
-              totalFocusMs: increment(addedDurationMs),
-              lastActive: Date.now()
-          });
-      } catch (e) {
-          await this.ensureUserProfile();
+  // Update cumulative focus time and XP
+  async updateUserStats(addedDurationMs: number): Promise<{ levelUp: boolean, newLevel: number }> {
+      const xpGained = Math.floor(addedDurationMs / 60000) * XP_PER_MINUTE;
+
+      // Dispatch XP gained event for sound effects
+      if (xpGained > 0) {
+          window.dispatchEvent(new Event('ekagra_xp_gained'));
       }
+
+      if (!this.userId) {
+          // Guest Mode Logic - Update LocalStorage
+          const currentXP = parseInt(localStorage.getItem('ekagrazone_guest_xp') || '0');
+          const currentLevel = parseInt(localStorage.getItem('ekagrazone_guest_level') || '1');
+          const currentTotalMs = parseInt(localStorage.getItem('ekagrazone_guest_totalFocusMs') || '0');
+
+          const newXP = Math.max(0, currentXP + xpGained); // Ensure XP doesn't go below 0
+          const newTotalMs = Math.max(0, currentTotalMs + addedDurationMs);
+          const newLevel = getLevelFromXP(newXP);
+          const levelUp = newLevel > currentLevel;
+
+          localStorage.setItem('ekagrazone_guest_xp', newXP.toString());
+          localStorage.setItem('ekagrazone_guest_level', newLevel.toString());
+          localStorage.setItem('ekagrazone_guest_totalFocusMs', newTotalMs.toString());
+
+          return { levelUp, newLevel };
+      }
+      
+      // Cloud Logic
+      const userRef = doc(db, 'user_profiles', this.userId);
+
+      try {
+          const snap = await getDoc(userRef);
+          if (snap.exists()) {
+              const data = snap.data() as UserProfile;
+              const currentXP = data.xp || 0;
+              const currentLevel = data.level || 1;
+              const currentTotalMs = data.totalFocusMs || 0;
+              
+              const newXP = Math.max(0, currentXP + xpGained);
+              const newLevel = getLevelFromXP(newXP);
+              const levelUp = newLevel > currentLevel;
+              const newTotalMs = currentTotalMs + addedDurationMs;
+
+              await updateDoc(userRef, {
+                  totalFocusMs: increment(addedDurationMs),
+                  xp: newXP,
+                  level: newLevel,
+                  lastActive: Date.now()
+              });
+
+              // Sync to Realtime Database for Leaderboard
+              // Path: users/{uid}/stats
+              const statsRef = ref(rtdb, `users/${this.userId}/stats`);
+              rtdbUpdate(statsRef, {
+                  totalXP: newXP,
+                  level: newLevel,
+                  totalFocusMs: newTotalMs,
+                  displayName: data.displayName || 'Anonymous',
+                  photoURL: data.photoURL || null
+              }).catch(e => console.warn("RTDB sync warning:", e));
+
+              // --- MILESTONE TRIGGER ---
+              if (levelUp) {
+                  const milestoneRef = ref(rtdb, `users/${this.userId}/milestones/latest`);
+                  const rankInfo = getRankInfo(newLevel);
+                  rtdbSet(milestoneRef, {
+                      username: data.displayName || 'Friend',
+                      message: `reached Level ${newLevel}!`,
+                      tier: rankInfo.title,
+                      tierColor: rankInfo.color, // Storing color ref for convenience
+                      level: newLevel,
+                      timestamp: serverTimestamp()
+                  }).catch(e => console.error("Milestone broadcast failed", e));
+              }
+
+              return { levelUp, newLevel };
+          } else {
+              await this.ensureUserProfile();
+              // Recursive call once profile ensured
+              return this.updateUserStats(addedDurationMs);
+          }
+      } catch (e) {
+          console.error("Error updating stats", e);
+          return { levelUp: false, newLevel: 1 };
+      }
+  }
+
+  // Leaderboard Subscription (Live)
+  subscribeToLeaderboard(callback: (users: UserProfile[]) => void, limitCount: number = 10): Unsubscribe {
+      const q = query(
+          collection(db, 'user_profiles'),
+          orderBy('xp', 'desc'),
+          limit(limitCount)
+      );
+
+      return onSnapshot(q, (snapshot) => {
+          const users: UserProfile[] = [];
+          snapshot.forEach((doc) => {
+              users.push(doc.data() as UserProfile);
+          });
+          callback(users);
+      }, (error) => {
+          console.warn("Leaderboard subscription error:", error.message);
+          callback([]); // Return empty list on error to prevent UI crash
+      });
   }
 
   // 3. Find User via Username Lookup
@@ -255,9 +384,12 @@ class LocalDB {
 
           const resolvedFriends = await Promise.all(profilePromises);
           callback(resolvedFriends);
+      }, (error) => {
+          console.warn("Friends subscription error:", error.message);
       });
   }
 
+  // ... (Rest of existing methods remain unchanged)
   async getFriendTasks(friendUid: string, dateString: string): Promise<Task[]> {
       try {
           const q = query(collection(db, 'users', friendUid, 'tasks'), where('dateString', '==', dateString));
@@ -269,7 +401,6 @@ class LocalDB {
       }
   }
 
-  // Fetch Friend's Sessions for Detailed Breakdown
   async getFriendSessions(friendUid: string, dateString: string): Promise<StudySession[]> {
       try {
           const q = query(collection(db, 'users', friendUid, 'sessions'), where('dateString', '==', dateString));
@@ -281,7 +412,6 @@ class LocalDB {
       }
   }
 
-  // Fetch Friend's Subjects to map IDs to Names
   async getFriendSubjects(friendUid: string): Promise<Subject[]> {
       try {
           const snap = await getDocs(collection(db, 'users', friendUid, 'subjects'));
@@ -354,16 +484,17 @@ class LocalDB {
       }
   }
 
-  async saveSession(session: StudySession): Promise<void> {
+  async saveSession(session: StudySession): Promise<{ levelUp: boolean, newLevel: number }> {
     const db = await this.connect();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE_SESSIONS, 'readwrite');
       const store = transaction.objectStore(STORE_SESSIONS);
       const request = store.put(session);
-      request.onsuccess = () => {
+      request.onsuccess = async () => {
           this.syncToFirestore(STORE_SESSIONS, session);
-          this.updateUserFocusTime(session.durationMs);
-          resolve();
+          // Update Stats and Check for Level Up
+          const statsResult = await this.updateUserStats(session.durationMs);
+          resolve(statsResult);
       };
       request.onerror = () => reject(request.error);
     });
@@ -375,12 +506,12 @@ class LocalDB {
         const transaction = db.transaction(STORE_SESSIONS, 'readwrite');
         const store = transaction.objectStore(STORE_SESSIONS);
         const getReq = store.get(id);
-        getReq.onsuccess = () => {
+        getReq.onsuccess = async () => {
             const session = getReq.result as StudySession;
             const request = store.delete(id);
-            request.onsuccess = () => {
+            request.onsuccess = async () => {
                 this.deleteFromFirestore(STORE_SESSIONS, id);
-                if (session) this.updateUserFocusTime(-session.durationMs);
+                if (session) await this.updateUserStats(-session.durationMs);
                 resolve();
             };
             request.onerror = () => reject(request.error);
@@ -524,7 +655,7 @@ class LocalDB {
               snapshot.forEach(doc => batch.delete(doc.ref));
           }
           batch.delete(doc(db, 'users', this.userId, 'settings', 'config'));
-          batch.update(doc(db, 'user_profiles', this.userId), { totalFocusMs: 0 });
+          batch.update(doc(db, 'user_profiles', this.userId), { totalFocusMs: 0, xp: 0, level: 1 });
           await batch.commit();
       } 
       const dbInstance = await this.connect();
@@ -533,6 +664,11 @@ class LocalDB {
       const tx = dbInstance.transaction(existingStores, 'readwrite');
       existingStores.forEach(s => tx.objectStore(s).clear());
       LOCAL_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+      // Clear Guest Stats
+      localStorage.removeItem('ekagrazone_guest_xp');
+      localStorage.removeItem('ekagrazone_guest_level');
+      localStorage.removeItem('ekagrazone_guest_totalFocusMs');
+      
       window.dispatchEvent(new Event('ekagrazone_sync_complete'));
   }
 

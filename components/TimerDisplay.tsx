@@ -6,6 +6,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { dbService } from '../services/db';
 import { useSound, SoundType } from '../contexts/SoundContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import { XP_PER_MINUTE } from '../utils/xp';
 
 interface TimerDisplayProps {
   elapsedMs: number;
@@ -164,6 +165,9 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
   const remainingMs = Math.max(0, targetDuration - elapsedMs);
   const displayMs = isTimerMode ? remainingMs : elapsedMs;
   const isComplete = isTimerMode && elapsedMs >= targetDuration;
+
+  // Potential XP Calc
+  const potentialXP = Math.floor(elapsedMs / 60000) * XP_PER_MINUTE;
 
   const formatTime = (ms: number) => {
     const totalSeconds = Math.ceil(ms / 1000); 
@@ -361,12 +365,23 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
                         
                         {/* Contextual Info */}
                         {mode === 'stopwatch' || mode === 'pomodoro' ? (
-                            <div className={`mt-2 md:mt-4 px-3 py-1.5 rounded-full bg-slate-900/60 backdrop-blur-md border border-white/10 text-slate-300 text-[10px] md:text-xs font-medium flex items-center gap-2 animate-enter`}>
-                                <div 
-                                    className={`w-1.5 h-1.5 rounded-full shadow-[0_0_5px_currentColor] ${!theme.isHex ? theme.bg : ''} ${status === 'running' ? 'animate-pulse' : ''}`} 
-                                    style={theme.isHex ? { backgroundColor: theme.bg, boxShadow: `0 0 5px ${theme.bg}` } : {}}
-                                />
-                                <span>Today: {formatShort(todaySubjectTotal + (status !== 'idle' ? elapsedMs : 0))}</span>
+                            <div className="flex flex-col items-center mt-2 md:mt-4 gap-2">
+                                {/* Potential XP Pill */}
+                                {status !== 'idle' && (
+                                    <div className="animate-in slide-in-from-bottom-2 fade-in">
+                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-amber-500/20 to-orange-500/20 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-300">
+                                            <span className="animate-pulse">+ {potentialXP} XP</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className={`px-3 py-1.5 rounded-full bg-slate-900/60 backdrop-blur-md border border-white/10 text-slate-300 text-[10px] md:text-xs font-medium flex items-center gap-2 animate-enter`}>
+                                    <div 
+                                        className={`w-1.5 h-1.5 rounded-full shadow-[0_0_5px_currentColor] ${!theme.isHex ? theme.bg : ''} ${status === 'running' ? 'animate-pulse' : ''}`} 
+                                        style={theme.isHex ? { backgroundColor: theme.bg, boxShadow: `0 0 5px ${theme.bg}` } : {}}
+                                    />
+                                    <span>Today: {formatShort(todaySubjectTotal + (status !== 'idle' ? elapsedMs : 0))}</span>
+                                </div>
                             </div>
                         ) : (
                             <div className="mt-4 text-xs font-medium text-slate-400 animate-enter bg-slate-900/40 px-3 py-1 rounded-full border border-white/5">
