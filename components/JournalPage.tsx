@@ -306,4 +306,9 @@ export const JournalPage: React.FC = () => {
                                 className="absolute inset-0 bg-white/10 border border-white/5 rounded-xl shadow-inner"
                                 transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                             />
-                        )}
+                        )
+                        }
+                      }
+                      }
+                      
+                      
