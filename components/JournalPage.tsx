@@ -308,7 +308,3 @@ export const JournalPage: React.FC = () => {
                             />
                         )
                         }
-                      }
-                      }
-                      
-                      
