@@ -2,38 +2,38 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Zap, BarChart2, Timer, Workflow, CheckCircle2, Shield, ArrowRight, Layout, Calendar, CheckSquare } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, useScroll, useTransform } from 'framer-motion';
 
 const SHOWCASE_ITEMS = [
   {
     title: "Command Center",
     description: "Your mission control for productivity. Get a bird's-eye view of your daily progress, focus rhythm, and active streaks in one beautiful interface.",
-    image: "https://i.ibb.co/8DMkB7pG/image.png"
+    image: "https://i.ibb.co/7JQz3mtH/image.png"
   },
   {
     title: "Deep Focus Zone",
     description: "Enter a distraction-free state with our precision timer. Customize intervals, track sessions, and immerse yourself in work.",
-    image: "https://i.ibb.co/ycLXFNNk/image.png"
+    image: "https://i.ibb.co/HfmcGh5D/image.png"
   },
   {
     title: "Zen Mode",
     description: "Achieve flow state with immersive, full-screen backgrounds. Minimalist visuals help you stay locked in for hours.",
-    image: "https://i.ibb.co/2Y6gq1qK/image.png"
+    image: "https://i.ibb.co/svzGgFqZ/image.png"
   },
   {
     title: "Habit Forge",
     description: "Build lasting rituals. Visualize your consistency with heatmaps and advanced streak tracking to maintain momentum.",
-    image: "https://i.ibb.co/Z17q8q3P/image.png"
+    image: "https://i.ibb.co/twLV1SyM/image.png"
   },
   {
     title: "Mindful Reflection",
     description: "Daily journaling designed for growth. Track energy levels, stress, and gratitude to optimize your mental performance.",
-    image: "https://i.ibb.co/zWYJ5nxg/image.png"
+    image: "https://i.ibb.co/bnQ5p5v/image.png"
   },
   {
     title: "Advanced Analytics",
     description: "Data-driven insights for your brain. Analyze study patterns, subject breakdowns, and session quality over time.",
-    image: "https://i.ibb.co/6c4yV4Cf/image.png"
+    image: "https://i.ibb.co/nqQjLY2g/image.png"
   }
 ];
 
@@ -41,6 +41,9 @@ export const LoginPage: React.FC = () => {
   const { signInWithGoogle, continueAsGuest } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [isSpinning, setIsSpinning] = useState(false);
+  const { scrollY } = useScroll();
+  
+  const backgroundY = useTransform(scrollY, [0, 1000], [0, 200]);
 
   useEffect(() => {
     setMounted(true);
@@ -52,19 +55,45 @@ export const LoginPage: React.FC = () => {
       setTimeout(() => setIsSpinning(false), 700);
   };
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.15,
+        delayChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 30, filter: 'blur(10px)' },
+    visible: { 
+        opacity: 1, 
+        y: 0, 
+        filter: 'blur(0px)',
+        transition: { type: "spring", stiffness: 40, damping: 10 } 
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#050511] text-slate-200 font-sans selection:bg-cyan-500/30 flex flex-col relative overflow-x-hidden">
       
       {/* Dynamic Background */}
-      <div className="fixed inset-0 pointer-events-none z-0">
+      <motion.div style={{ y: backgroundY }} className="fixed inset-0 pointer-events-none z-0">
           <div className="absolute top-[-20%] left-[-10%] w-[70vw] h-[70vw] bg-cyan-600/10 blur-[120px] rounded-full mix-blend-screen animate-pulse duration-[8000ms]" />
           <div className="absolute bottom-[-20%] right-[-10%] w-[60vw] h-[60vw] bg-blue-600/10 blur-[120px] rounded-full mix-blend-screen animate-pulse duration-[10000ms]" />
           <div className="absolute top-[40%] left-[30%] w-[40vw] h-[40vw] bg-emerald-500/5 blur-[150px] rounded-full mix-blend-screen" />
           <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
-      </div>
+      </motion.div>
 
       {/* Navbar */}
-      <nav className="w-full max-w-7xl mx-auto px-6 py-6 flex justify-between items-center relative z-20">
+      <motion.nav 
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="w-full max-w-7xl mx-auto px-6 py-6 flex justify-between items-center relative z-20"
+      >
           <div className="flex items-center gap-2 cursor-pointer select-none" onClick={triggerSpin}>
             <div 
                 className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 transition-transform"
@@ -78,39 +107,45 @@ export const LoginPage: React.FC = () => {
               <span className="flex items-center gap-1.5"><Shield size={14} className="text-emerald-400"/> Local-First & Private</span>
               <span>v1.0</span>
           </div>
-      </nav>
+      </motion.nav>
 
       {/* Main Hero Content */}
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center relative z-10 py-12 lg:py-20">
           
           {/* Left Column: Copy & Actions */}
-          <div className={`space-y-8 max-w-2xl transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+          <motion.div 
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="space-y-8 max-w-2xl"
+          >
              
              {/* Badge */}
-             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-bold uppercase tracking-widest mb-2">
+             <motion.div variants={itemVariants} className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-bold uppercase tracking-widest mb-2">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
                 </span>
                 The Ultimate Zen Focus OS
-             </div>
+             </motion.div>
 
              {/* Headline */}
-             <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-white tracking-tight leading-[1.1]">
+             <motion.h1 variants={itemVariants} className="text-5xl sm:text-6xl lg:text-7xl font-bold text-white tracking-tight leading-[1.1]">
                 Master your <br/>
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-indigo-400">flow state.</span>
-             </h1>
+             </motion.h1>
 
-             <p className="text-lg text-slate-400 leading-relaxed max-w-lg">
+             <motion.p variants={itemVariants} className="text-lg text-slate-400 leading-relaxed max-w-lg">
                 Stop juggling apps. Ekagrazone combines a pro-grade timer, habit tracker, and analytics engine into one beautiful, local-first workspace.
-             </p>
+             </motion.p>
 
              {/* Action Buttons */}
-             <div className="flex flex-col sm:flex-row gap-4 pt-4">
+             <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-4 pt-4">
                  <button 
                     onClick={signInWithGoogle}
-                    className="h-14 px-8 bg-white text-slate-900 hover:bg-slate-100 rounded-xl flex items-center justify-center gap-3 transition-all font-bold text-base shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95"
+                    className="h-14 px-8 bg-white text-slate-900 hover:bg-slate-100 rounded-xl flex items-center justify-center gap-3 transition-all font-bold text-base shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95 group relative overflow-hidden"
                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
                     <svg className="w-5 h-5" viewBox="0 0 24 24">
                         <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
                         <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
@@ -125,12 +160,12 @@ export const LoginPage: React.FC = () => {
                  >
                     Try as Guest <ArrowRight size={16} />
                  </button>
-             </div>
+             </motion.div>
 
              {/* Features Grid (Bento Style with "Screenshots") */}
-             <div className="grid grid-cols-2 gap-4 pt-8">
+             <motion.div variants={containerVariants} className="grid grid-cols-2 gap-4 pt-8">
                  {/* Feature 1: Timer */}
-                 <div className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group">
+                 <motion.div variants={itemVariants} className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group hover:-translate-y-1 duration-300">
                      <div className="flex items-center gap-3">
                         <div className="p-2 bg-cyan-500/20 rounded-lg text-cyan-400"><Timer size={18} /></div>
                         <h3 className="font-bold text-slate-200 text-sm">Focus Timer</h3>
@@ -139,30 +174,34 @@ export const LoginPage: React.FC = () => {
                      <div className="w-full h-24 bg-slate-950/50 rounded-lg border border-white/5 relative flex items-center justify-center overflow-hidden">
                         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10"></div>
                         <div className="w-16 h-16 rounded-full border-2 border-cyan-500/30 flex items-center justify-center relative">
-                            <div className="w-12 h-12 rounded-full bg-cyan-500/10 animate-pulse"></div>
+                            <motion.div 
+                                animate={{ scale: [1, 1.1, 1], opacity: [0.5, 0.8, 0.5] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                                className="w-12 h-12 rounded-full bg-cyan-500/10" 
+                            />
                             <span className="absolute text-[10px] font-mono font-bold text-white">25:00</span>
                         </div>
                      </div>
-                 </div>
+                 </motion.div>
 
                  {/* Feature 2: Analytics */}
-                 <div className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group">
+                 <motion.div variants={itemVariants} className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group hover:-translate-y-1 duration-300">
                      <div className="flex items-center gap-3">
                         <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400"><BarChart2 size={18} /></div>
                         <h3 className="font-bold text-slate-200 text-sm">Deep Analytics</h3>
                      </div>
                      {/* Mini UI Mockup */}
                      <div className="w-full h-24 bg-slate-950/50 rounded-lg border border-white/5 relative flex items-end justify-between px-3 pb-3 gap-1 overflow-hidden">
-                        <div className="w-1/5 h-1/2 bg-emerald-500/20 rounded-t-sm"></div>
-                        <div className="w-1/5 h-3/4 bg-emerald-500/40 rounded-t-sm"></div>
-                        <div className="w-1/5 h-2/3 bg-emerald-500/30 rounded-t-sm"></div>
-                        <div className="w-1/5 h-full bg-emerald-500 rounded-t-sm shadow-[0_0_10px_rgba(16,185,129,0.3)]"></div>
-                        <div className="w-1/5 h-1/2 bg-emerald-500/20 rounded-t-sm"></div>
+                        <motion.div initial={{ height: '10%' }} animate={{ height: '50%' }} transition={{ delay: 0.5 }} className="w-1/5 bg-emerald-500/20 rounded-t-sm"></motion.div>
+                        <motion.div initial={{ height: '10%' }} animate={{ height: '75%' }} transition={{ delay: 0.6 }} className="w-1/5 bg-emerald-500/40 rounded-t-sm"></motion.div>
+                        <motion.div initial={{ height: '10%' }} animate={{ height: '60%' }} transition={{ delay: 0.7 }} className="w-1/5 bg-emerald-500/30 rounded-t-sm"></motion.div>
+                        <motion.div initial={{ height: '10%' }} animate={{ height: '100%' }} transition={{ delay: 0.8 }} className="w-1/5 bg-emerald-500 rounded-t-sm shadow-[0_0_10px_rgba(16,185,129,0.3)]"></motion.div>
+                        <motion.div initial={{ height: '10%' }} animate={{ height: '50%' }} transition={{ delay: 0.9 }} className="w-1/5 bg-emerald-500/20 rounded-t-sm"></motion.div>
                      </div>
-                 </div>
+                 </motion.div>
 
                  {/* Feature 3: Habit Forge */}
-                 <div className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group">
+                 <motion.div variants={itemVariants} className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group hover:-translate-y-1 duration-300">
                      <div className="flex items-center gap-3">
                         <div className="p-2 bg-amber-500/20 rounded-lg text-amber-400"><Workflow size={18} /></div>
                         <h3 className="font-bold text-slate-200 text-sm">Habit Forge</h3>
@@ -170,7 +209,7 @@ export const LoginPage: React.FC = () => {
                      {/* Mini UI Mockup */}
                      <div className="w-full h-24 bg-slate-950/50 rounded-lg border border-white/5 relative flex flex-col justify-center px-3 gap-2 overflow-hidden">
                         <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded bg-amber-500 flex items-center justify-center text-[8px] text-black font-bold">✓</div>
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 1 }} className="w-4 h-4 rounded bg-amber-500 flex items-center justify-center text-[8px] text-black font-bold">✓</motion.div>
                             <div className="h-2 w-16 bg-slate-800 rounded-full"></div>
                         </div>
                         <div className="flex items-center gap-2 opacity-50">
@@ -178,14 +217,14 @@ export const LoginPage: React.FC = () => {
                             <div className="h-2 w-12 bg-slate-800 rounded-full"></div>
                         </div>
                         <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded bg-amber-500 flex items-center justify-center text-[8px] text-black font-bold">✓</div>
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 1.2 }} className="w-4 h-4 rounded bg-amber-500 flex items-center justify-center text-[8px] text-black font-bold">✓</motion.div>
                             <div className="h-2 w-20 bg-slate-800 rounded-full"></div>
                         </div>
                      </div>
-                 </div>
+                 </motion.div>
 
                  {/* Feature 4: Task Planner */}
-                 <div className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group">
+                 <motion.div variants={itemVariants} className="bg-slate-900/40 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 backdrop-blur-sm hover:bg-white/5 transition-colors overflow-hidden group hover:-translate-y-1 duration-300">
                      <div className="flex items-center gap-3">
                         <div className="p-2 bg-pink-500/20 rounded-lg text-pink-400"><Calendar size={18} /></div>
                         <h3 className="font-bold text-slate-200 text-sm">Task Planner</h3>
@@ -202,9 +241,9 @@ export const LoginPage: React.FC = () => {
                             <div className="h-6 w-full bg-pink-500/20 rounded border border-pink-500/30"></div>
                         </div>
                      </div>
-                 </div>
-             </div>
-          </div>
+                 </motion.div>
+             </motion.div>
+          </motion.div>
 
           {/* Right Column: 3D UI Showcase */}
           <div className="relative hidden lg:block h-[600px] w-full perspective-1000">
@@ -218,38 +257,57 @@ export const LoginPage: React.FC = () => {
         {SHOWCASE_ITEMS.map((item, index) => (
             <motion.div 
                 key={index}
-                initial={{ opacity: 0, y: 40 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-100px" }}
-                transition={{ duration: 0.7, ease: "easeOut" }}
+                initial={{ opacity: 0, y: 100, scale: 0.95 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                viewport={{ once: true, margin: "-10%" }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
                 className={`flex flex-col ${index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'} items-center gap-12 lg:gap-24`}
             >
                 {/* Text Side */}
                 <div className="flex-1 space-y-6">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-cyan-300 text-xs font-bold uppercase tracking-widest shadow-sm">
+                    <motion.div 
+                        initial={{ x: -20, opacity: 0 }}
+                        whileInView={{ x: 0, opacity: 1 }}
+                        transition={{ delay: 0.2 }}
+                        className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-cyan-300 text-xs font-bold uppercase tracking-widest shadow-sm"
+                    >
                         <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></div>
                         Feature {index + 1}
-                    </div>
-                    <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white leading-tight tracking-tight">
+                    </motion.div>
+                    <motion.h2 
+                        initial={{ opacity: 0 }}
+                        whileInView={{ opacity: 1 }}
+                        transition={{ delay: 0.3, duration: 0.5 }}
+                        className="text-3xl md:text-4xl lg:text-5xl font-bold text-white leading-tight tracking-tight"
+                    >
                         {item.title}
-                    </h2>
-                    <p className="text-lg text-slate-400 leading-relaxed max-w-xl">
+                    </motion.h2>
+                    <motion.p 
+                        initial={{ opacity: 0 }}
+                        whileInView={{ opacity: 1 }}
+                        transition={{ delay: 0.4, duration: 0.5 }}
+                        className="text-lg text-slate-400 leading-relaxed max-w-xl"
+                    >
                         {item.description}
-                    </p>
+                    </motion.p>
                 </div>
 
                 {/* Image Side */}
                 <div className="flex-1 w-full">
-                    <div className="relative group rounded-3xl border border-white/10 bg-slate-900/50 backdrop-blur-sm overflow-hidden shadow-2xl hover:shadow-cyan-500/10 transition-all duration-500">
+                    <motion.div 
+                        whileHover={{ scale: 1.02, rotateY: index % 2 === 0 ? 2 : -2 }}
+                        transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                        className="relative group rounded-3xl border border-white/10 bg-slate-900/50 backdrop-blur-sm overflow-hidden shadow-2xl hover:shadow-cyan-500/10 transition-all duration-500"
+                    >
                         {/* Overlay Gradient */}
                         <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none z-10" />
                         <img 
                             src={item.image} 
                             alt={item.title} 
-                            className="w-full h-auto transform transition-transform duration-700 group-hover:scale-[1.02]"
+                            className="w-full h-auto transform transition-transform duration-700"
                             loading="lazy"
                         />
-                    </div>
+                    </motion.div>
                 </div>
             </motion.div>
         ))}
@@ -267,7 +325,12 @@ export const LoginPage: React.FC = () => {
 
 const MockInterface = () => {
     return (
-        <div className="relative w-full h-full transform rotate-y-[-10deg] rotate-x-[5deg] hover:rotate-y-[-5deg] hover:rotate-x-[2deg] transition-transform duration-700 ease-out preserve-3d">
+        <motion.div 
+            initial={{ opacity: 0, x: 100, rotateY: -20 }}
+            animate={{ opacity: 1, x: 0, rotateY: -10 }}
+            transition={{ duration: 1.2, ease: "easeOut", delay: 0.2 }}
+            className="relative w-full h-full transform hover:rotate-y-[-5deg] hover:rotate-x-[2deg] transition-transform duration-700 ease-out preserve-3d"
+        >
             
             {/* Main Window */}
             <div className="absolute inset-0 bg-[#0f172a] rounded-[2rem] border border-white/10 shadow-2xl overflow-hidden flex flex-col">
@@ -339,8 +402,11 @@ const MockInterface = () => {
             {/* Floating Task List */}
             <motion.div 
                 initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.5, duration: 0.8 }}
+                animate={{ y: [0, -15, 0], opacity: 1 }}
+                transition={{ 
+                    opacity: { delay: 0.8, duration: 0.5 },
+                    y: { duration: 6, repeat: Infinity, ease: "easeInOut" }
+                }}
                 className="absolute -right-12 top-20 w-64 bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl transform rotate-y-12 rotate-z-2"
             >
                 <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
@@ -366,8 +432,12 @@ const MockInterface = () => {
             {/* Floating Notification */}
             <motion.div 
                 initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 0.8, duration: 0.8 }}
+                animate={{ x: 0, opacity: 1, y: [0, -10, 0] }}
+                transition={{ 
+                    opacity: { delay: 1.1, duration: 0.5 },
+                    x: { delay: 1.1, duration: 0.5 },
+                    y: { duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }
+                }}
                 className="absolute -left-8 bottom-32 w-auto flex items-center gap-3 bg-slate-800/90 backdrop-blur-xl border border-emerald-500/20 p-3 pr-6 rounded-full shadow-2xl transform -rotate-y-12 -rotate-z-2"
             >
                 <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
@@ -379,6 +449,6 @@ const MockInterface = () => {
                 </div>
             </motion.div>
 
-        </div>
+        </motion.div>
     );
 }
