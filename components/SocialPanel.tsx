@@ -25,7 +25,7 @@ const FriendRow: React.FC<{
     showStatus?: boolean;
     subtitle?: string; 
 }> = ({ profile, rank, isMe, onClick, showStatus = true, subtitle }) => {
-    const [isFocusing, setIsFocusing] = useState(false);
+    const [status, setStatus] = useState<{ isOnline: boolean; isFocusing: boolean }>({ isOnline: false, isFocusing: false });
     const rankInfo = getRankInfo(profile.level || 1);
 
     useEffect(() => {
@@ -33,7 +33,14 @@ const FriendRow: React.FC<{
         const statusRef = ref(rtdb, `users/${profile.uid}/publicStatus`);
         const handleUpdate = (snapshot: any) => {
             const val = snapshot.val();
-            setIsFocusing(val ? val.isFocusing : false);
+            if (val) {
+                setStatus({
+                    isOnline: val.isOnline || false,
+                    isFocusing: val.isFocusing || false
+                });
+            } else {
+                setStatus({ isOnline: false, isFocusing: false });
+            }
         };
         onValue(statusRef, handleUpdate);
         return () => off(statusRef);
@@ -65,19 +72,23 @@ const FriendRow: React.FC<{
                 </div>
                 
                 <div className="relative flex-none">
-                    <div className={`absolute -inset-1 bg-emerald-500/30 rounded-full blur-md transition-opacity duration-500 ${isFocusing ? 'opacity-100 animate-pulse' : 'opacity-0'}`} />
+                    {/* Live Presence Dots */}
+                    <div className="absolute -top-1 -right-1 z-20">
+                        {status.isFocusing ? (
+                            <span className="relative flex h-3 w-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
+                            </span>
+                        ) : status.isOnline ? (
+                            <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.8)] border border-slate-900"></span>
+                        ) : null}
+                    </div>
+
                     {profile.photoURL ? (
-                        <img src={profile.photoURL} className={`w-10 h-10 rounded-full object-cover bg-slate-800 relative z-10 border-2 ${isFocusing ? 'border-emerald-500' : 'border-transparent'}`} alt={profile.displayName} />
+                        <img src={profile.photoURL} className={`w-10 h-10 rounded-full object-cover bg-slate-800 relative z-10 border-2 ${status.isFocusing ? 'border-cyan-500/50' : 'border-transparent'}`} alt={profile.displayName} />
                     ) : (
-                        <div className={`w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 relative z-10 border-2 ${isFocusing ? 'border-emerald-500' : 'border-transparent'}`}>
+                        <div className={`w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 relative z-10 border-2 ${status.isFocusing ? 'border-cyan-500/50' : 'border-transparent'}`}>
                             {profile.displayName?.[0]}
-                        </div>
-                    )}
-                    {isFocusing && (
-                        <div className="absolute -bottom-1 -right-1 z-20 bg-slate-900 rounded-full p-0.5">
-                            <div className="bg-emerald-500 rounded-full p-0.5 animate-bounce">
-                                <Zap size={8} fill="white" className="text-white" />
-                            </div>
                         </div>
                     )}
                 </div>
@@ -105,12 +116,12 @@ const FriendRow: React.FC<{
             </div>
 
             <div className="text-right flex-none pl-3">
-                <div className={`text-sm font-mono font-bold ${isFocusing ? 'text-emerald-400' : 'text-slate-300'}`}>
+                <div className={`text-sm font-mono font-bold ${status.isFocusing ? 'text-cyan-400' : 'text-slate-300'}`}>
                     {(profile.xp || 0).toLocaleString()} <span className="text-[10px] text-slate-500 font-sans">XP</span>
                 </div>
-                {isFocusing && (
-                    <div className="text-[9px] text-emerald-500 font-bold uppercase tracking-wider animate-pulse flex items-center justify-end gap-1">
-                        Live <Activity size={8} />
+                {status.isFocusing && (
+                    <div className="text-[9px] text-cyan-400 font-bold uppercase tracking-wider animate-pulse flex items-center justify-end gap-1">
+                        Focusing <Zap size={8} fill="currentColor" />
                     </div>
                 )}
             </div>
@@ -168,8 +179,8 @@ export const SocialPanel: React.FC = () => {
                         totalFocusMs: stats.totalFocusMs || 0,
                         xp: stats.totalXP || 0,
                         level: stats.level || 1,
-                        lastActive: 0, // Not strictly needed for leaderboard display
-                        email: '' // Not exposed
+                        lastActive: 0, 
+                        email: '' 
                     });
                 }
             });

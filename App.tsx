@@ -20,11 +20,12 @@ import { SocialPanel } from './components/SocialPanel';
 import { UsernameSetup } from './components/UsernameSetup';
 import { LevelUpModal } from './components/LevelUpModal';
 import { FriendObserver } from './components/FriendObserver';
+import { NotificationCenter } from './components/NotificationCenter';
 import { useAuth } from './contexts/AuthContext'; 
 import { dbService } from './services/db';
 import { useSound } from './contexts/SoundContext';
 import { StudySession, Subject, DEFAULT_SUBJECTS, Task, Exam, isHexColor, TimerDurations, DEFAULT_DURATIONS, UserProfile } from './types';
-import { Zap, Wifi, WifiOff, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, Timer, BarChart3, CalendarDays, Target, Trash2, AlertCircle, PanelLeftClose, PanelLeftOpen, CheckSquare, Palette, Image as ImageIcon, ToggleLeft, ToggleRight, Maximize2, X, BookOpen, Repeat, Home, AlertTriangle, Download, Upload, Database, Layout, Rocket, Globe, RotateCcw, LogOut, HardDrive, LogIn, GraduationCap, Volume2, VolumeX, Play, Pause, Hourglass, Users } from 'lucide-react';
+import { Zap, Wifi, WifiOff, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, Timer, BarChart3, CalendarDays, Target, Trash2, AlertCircle, PanelLeftClose, PanelLeftOpen, CheckSquare, Palette, Image as ImageIcon, ToggleLeft, ToggleRight, Maximize2, X, BookOpen, Repeat, Home, AlertTriangle, Download, Upload, Database, Layout, Rocket, Globe, RotateCcw, LogOut, HardDrive, LogIn, GraduationCap, Volume2, VolumeX, Play, Pause, Hourglass, Users, Bell } from 'lucide-react';
 import { useTheme, ACCENT_COLORS } from './contexts/ThemeContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { rtdb } from './services/firebase';
@@ -146,6 +147,10 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [usernameNeeded, setUsernameNeeded] = useState(false);
   
+  // UI State
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  
   // Level Up State
   const [levelUpData, setLevelUpData] = useState<{ show: boolean; level: number }>({ show: false, level: 1 });
 
@@ -168,17 +173,14 @@ const App: React.FC = () => {
 
   const { accent, setAccent } = useTheme();
   
-  // UI State
   const [activeTab, setActiveTab] = useState<MobileTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isSubjectManagerOpen, setIsSubjectManagerOpen] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{ type: 'today' | 'all'; title: string; message: string; } | null>(null);
   
-  // Focus Panel State
   const [isSidePanelCollapsed, setIsSidePanelCollapsed] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<'goals' | 'exams'>('goals');
 
-  // Shared View State
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
   // Derived Stats for RTDB
@@ -271,6 +273,21 @@ const App: React.FC = () => {
       window.removeEventListener('offline', handleOffline);
     };
   }, [currentUser, isGuest]);
+
+  // Unread Notification Listener
+  useEffect(() => {
+      if (!currentUser) return;
+      const notifRef = ref(rtdb, `users/${currentUser.uid}/notifications`);
+      return onValue(notifRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+              const count = Object.values(data).filter((n: any) => !n.read).length;
+              setUnreadCount(count);
+          } else {
+              setUnreadCount(0);
+          }
+      });
+  }, [currentUser]);
 
   const refreshSubjects = async () => {
       const storedSubjects = await dbService.getSubjects();
@@ -382,8 +399,8 @@ const App: React.FC = () => {
   const requestClearAll = () => {
       setConfirmModal({
           type: 'all',
-          title: "Factory Reset?",
-          message: "WARNING: This will wipe EVERYTHING. All sessions, tasks, habits, journals, and settings will be deleted from your device AND the cloud. This action is irreversible."
+          title: "⚠️ ARE YOU ABSOLUTELY SURE?",
+          message: "This action is permanent. You will lose your Rank, your XP will be wiped from the Global Leaderboard, and your focus history will vanish forever."
       });
   };
 
@@ -547,6 +564,12 @@ const App: React.FC = () => {
          <h1 className="font-bold text-xl tracking-tight text-slate-100">EKAGRAZONE</h1>
        </div>
        <div className="flex items-center gap-2">
+           {/* Notification Bell (Mobile) */}
+           <button onClick={() => setIsNotificationOpen(true)} className="p-1.5 rounded-full bg-white/5 border border-white/5 relative">
+               <Bell size={16} className="text-slate-400" />
+               {unreadCount > 0 && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-slate-900" />}
+           </button>
+
            {/* Mobile Sound Indicator */}
            {isPlaying && (
                <button onClick={togglePlay} className="p-1.5 rounded-full bg-white/5 border border-white/5 text-emerald-400 animate-pulse">
@@ -590,18 +613,74 @@ const App: React.FC = () => {
   );
 
   const ConfirmationModal = () => {
+    const [inputValue, setInputValue] = useState('');
+    const [isShaking, setIsShaking] = useState(false);
+
     if (!confirmModal) return null;
+
+    const isDangerMode = confirmModal.type === 'all';
+    const isValid = isDangerMode ? inputValue === 'RESET' : true;
+
+    const handleConfirm = () => {
+        if (!isValid) {
+            setIsShaking(true);
+            setTimeout(() => setIsShaking(false), 500);
+            return;
+        }
+        executeClear();
+    };
+
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
-                <div className="flex items-center gap-3 mb-4 text-red-400">
-                    <AlertTriangle size={32} />
-                    <h3 className="text-xl font-bold text-white leading-tight">{confirmModal.title}</h3>
+            <style>{`
+                @keyframes shake {
+                    0%, 100% { transform: translateX(0); }
+                    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+                    20%, 40%, 60%, 80% { transform: translateX(5px); }
+                }
+                .shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+            `}</style>
+            
+            <div className={`bg-slate-900 border ${isDangerMode ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-6 max-w-sm w-full shadow-2xl scale-100 animate-in zoom-in-95 duration-200`}>
+                <div className={`flex items-center gap-3 mb-4 ${isDangerMode ? 'text-red-500' : 'text-slate-200'}`}>
+                    <AlertTriangle size={32} className={isDangerMode ? 'animate-pulse' : ''} />
+                    <h3 className="text-xl font-bold leading-tight">{confirmModal.title}</h3>
                 </div>
-                <p className="text-slate-400 text-sm mb-8 leading-relaxed">{confirmModal.message}</p>
+                
+                <p className="text-slate-400 text-sm mb-6 leading-relaxed">{confirmModal.message}</p>
+                
+                {isDangerMode && (
+                    <div className="mb-6">
+                        <label className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-2 block">
+                            Type <span className="bg-red-500/10 px-1 rounded text-red-300">RESET</span> to confirm
+                        </label>
+                        <input 
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            placeholder="RESET"
+                            className="w-full bg-red-950/20 border border-red-900/50 rounded-xl p-3 text-red-200 placeholder-red-900/50 focus:outline-none focus:border-red-500 transition-colors font-mono font-bold tracking-widest text-center"
+                            autoFocus
+                        />
+                    </div>
+                )}
+
                 <div className="flex gap-3">
                     <button onClick={() => setConfirmModal(null)} className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-semibold transition-colors border border-white/5">Cancel</button>
-                    <button onClick={executeClear} className="flex-1 px-4 py-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-semibold transition-colors flex items-center justify-center gap-2"><Trash2 size={18} /> Delete</button>
+                    <button 
+                        onClick={handleConfirm} 
+                        className={`
+                            flex-1 px-4 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2
+                            ${isDangerMode 
+                                ? isValid 
+                                    ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-500/20' 
+                                    : 'bg-red-900/20 text-red-800 cursor-not-allowed border border-red-900/10 opacity-50'
+                                : 'bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20'
+                            }
+                            ${isShaking ? 'shake' : ''}
+                        `}
+                    >
+                        <Trash2 size={18} /> {isDangerMode ? 'Delete Everything' : 'Delete'}
+                    </button>
                 </div>
             </div>
         </div>
@@ -641,6 +720,7 @@ const App: React.FC = () => {
              </div>
         </div>
 
+        {/* ... Rest of Settings (unchanged) ... */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Column 1: Appearance */}
             <div className="space-y-8 h-full">
@@ -869,8 +949,11 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans overflow-hidden selection:bg-cyan-500/30 relative">
       
-      {/* Friend Milestone Observer */}
-      {!isGuest && <FriendObserver />}
+      {/* Friend Milestone Observer - Always render but handle user inside */}
+      <FriendObserver />
+      
+      {/* Notification Center - Always render */}
+      <NotificationCenter isOpen={isNotificationOpen} onClose={() => setIsNotificationOpen(false)} />
 
       {/* Background Ambience */}
       {!isZenActive && !isSpaceMode && (
@@ -1136,7 +1219,15 @@ const App: React.FC = () => {
                             {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
                         </span>}
                         </motion.h2>
-                        <div className="flex gap-4">
+                        <div className="flex gap-4 items-center">
+                            {/* Desktop Notification Bell */}
+                            <button onClick={() => setIsNotificationOpen(true)} className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors relative">
+                                <Bell size={20} className="text-slate-300" />
+                                {unreadCount > 0 && (
+                                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-slate-900" />
+                                )}
+                            </button>
+
                             {isGuest ? (
                                 <button 
                                     onClick={signInWithGoogle}

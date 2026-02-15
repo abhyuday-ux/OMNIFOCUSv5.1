@@ -2,11 +2,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { dbService } from '../services/db';
 import { rtdb } from '../services/firebase';
-import { ref, onValue, off } from 'firebase/database';
+import { ref, onValue, off, push, serverTimestamp } from 'firebase/database';
 import { Friend } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Flame, X, Crown, Star } from 'lucide-react';
-import { getRankInfo } from '../utils/xp';
+import { Trophy, Flame, X } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Toast {
     id: string;
@@ -18,10 +18,11 @@ interface Toast {
 }
 
 export const FriendObserver: React.FC = () => {
+    const { currentUser } = useAuth();
     const [toasts, setToasts] = useState<Toast[]>([]);
     const [friends, setFriends] = useState<Friend[]>([]);
     const unsubscribeRef = useRef<(() => void) | null>(null);
-    const rtdbListeners = useRef<Record<string, any>>({}); // Map uid -> listener
+    const rtdbListeners = useRef<Record<string, any>>({}); 
 
     // 1. Fetch Friends from Firestore
     useEffect(() => {
@@ -40,7 +41,7 @@ export const FriendObserver: React.FC = () => {
     useEffect(() => {
         const currentListeners = rtdbListeners.current;
 
-        // Cleanup old listeners if friend removed
+        // Cleanup old listeners
         Object.keys(currentListeners).forEach(uid => {
             if (!friends.find(f => f.uid === uid)) {
                 off(ref(rtdb, `users/${uid}/milestones/latest`));
@@ -58,9 +59,10 @@ export const FriendObserver: React.FC = () => {
                     if (data) {
                         const now = Date.now();
                         const timestamp = data.timestamp;
-                        // Only show if happened in last 30 seconds to prevent spam on load
+                        // Only show if happened in last 30 seconds to prevent spam
                         if (timestamp && (now - timestamp < 30000)) {
                             triggerToast(data);
+                            saveNotification(data);
                         }
                     }
                 });
@@ -68,13 +70,10 @@ export const FriendObserver: React.FC = () => {
             }
         });
 
-        return () => {
-            // Cleanup on unmount handled by ref, but good practice to clear all here if needed
-            // We rely on the unmount effect below
-        };
+        return () => {};
     }, [friends]);
 
-    // Cleanup all RTDB listeners on unmount
+    // Cleanup all on unmount
     useEffect(() => {
         return () => {
             Object.keys(rtdbListeners.current).forEach(uid => {
@@ -83,10 +82,25 @@ export const FriendObserver: React.FC = () => {
         };
     }, []);
 
+    const saveNotification = (data: any) => {
+        if (!currentUser) return;
+        const notificationsRef = ref(rtdb, `users/${currentUser.uid}/notifications`);
+        push(notificationsRef, {
+            type: 'milestone',
+            title: 'Friend Level Up',
+            message: `${data.username} ${data.message}`,
+            timestamp: serverTimestamp(),
+            read: false,
+            meta: {
+                tier: data.tier,
+                level: data.level
+            }
+        });
+    };
+
     const triggerToast = (data: any) => {
         const id = crypto.randomUUID();
         
-        // Audio Chime
         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3');
         audio.volume = 0.5;
         audio.play().catch(e => console.log("Audio play failed", e));
@@ -96,13 +110,12 @@ export const FriendObserver: React.FC = () => {
             username: data.username,
             message: data.message,
             tier: data.tier,
-            tierColor: data.tierColor || 'text-white', // Fallback
+            tierColor: data.tierColor || 'text-white',
             level: data.level
         };
 
         setToasts(prev => [...prev, newToast]);
 
-        // Auto dismiss
         setTimeout(() => {
             removeToast(id);
         }, 5000);
@@ -112,9 +125,7 @@ export const FriendObserver: React.FC = () => {
         setToasts(prev => prev.filter(t => t.id !== id));
     };
 
-    // Helper to get color class or fallback hex
     const getBorderColor = (rankTitle: string) => {
-        // We can use getRankInfo if we have level, or map title
         if(rankTitle.includes('GOLD')) return 'border-yellow-500/50 shadow-yellow-500/20';
         if(rankTitle.includes('SILVER')) return 'border-slate-400/50 shadow-slate-400/10';
         if(rankTitle.includes('BRONZE')) return 'border-orange-500/50 shadow-orange-500/20';
@@ -140,7 +151,6 @@ export const FriendObserver: React.FC = () => {
                                 ${borderClass} border-t border-b border-r border-white/10
                             `}
                         >
-                            {/* Animated Background Shine */}
                             <div className="absolute inset-0 bg-gradient-to-r from-white/5 to-transparent -skew-x-12 animate-[shimmer_2s_infinite]" />
 
                             <div className="p-2 bg-white/10 rounded-full flex-none relative z-10">

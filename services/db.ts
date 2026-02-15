@@ -2,7 +2,7 @@
 import { StudySession, Subject, DEFAULT_SUBJECTS, DailyGoal, Task, Exam, ChatMessage, JournalEntry, CustomSound, UserProfile, Friend, FriendStatus } from '../types';
 import { db, rtdb } from './firebase';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe, query, where, updateDoc, increment, limit, orderBy } from 'firebase/firestore';
-import { ref, update as rtdbUpdate, set as rtdbSet, serverTimestamp } from 'firebase/database';
+import { ref, update as rtdbUpdate, set as rtdbSet, serverTimestamp, remove as rtdbRemove } from 'firebase/database';
 import { XP_PER_MINUTE, getLevelFromXP, getRankInfo } from '../utils/xp';
 
 const DB_NAME = 'EkagrazoneDB';
@@ -648,23 +648,51 @@ class LocalDB {
 
   async factoryReset(): Promise<void> {
       if (this.userId) {
+          // 1. Wipe Firestore Collections
           const collections = [STORE_SESSIONS, STORE_SUBJECTS, STORE_GOALS, STORE_TASKS, STORE_EXAMS, STORE_JOURNAL, STORE_CHATS];
           const batch = writeBatch(db);
           for (const col of collections) {
               const snapshot = await getDocs(collection(db, 'users', this.userId, col));
               snapshot.forEach(doc => batch.delete(doc.ref));
           }
+          
+          // 2. Reset Profile Metrics (Firestore)
+          const profileRef = doc(db, 'user_profiles', this.userId);
+          batch.update(profileRef, { 
+              totalFocusMs: 0, 
+              xp: 0, 
+              level: 1,
+              lastActive: Date.now() 
+          });
+          
+          // Delete settings
           batch.delete(doc(db, 'users', this.userId, 'settings', 'config'));
-          batch.update(doc(db, 'user_profiles', this.userId), { totalFocusMs: 0, xp: 0, level: 1 });
+          
           await batch.commit();
+
+          // 3. Reset Realtime Database (Leaderboard Wipe)
+          // Set stats to 0/1/0 to effectively remove from leaderboard ranking logic
+          const rtdbStatsRef = ref(rtdb, `users/${this.userId}/stats`);
+          await rtdbUpdate(rtdbStatsRef, {
+              totalXP: 0,
+              level: 1,
+              totalFocusMs: 0
+          });
+
+          // Remove milestones
+          await rtdbRemove(ref(rtdb, `users/${this.userId}/milestones`));
+          await rtdbRemove(ref(rtdb, `users/${this.userId}/lastMilestone`));
       } 
+      
+      // 4. Wipe Local IndexedDB
       const dbInstance = await this.connect();
       const stores = [STORE_SESSIONS, STORE_SUBJECTS, STORE_GOALS, STORE_TASKS, STORE_EXAMS, STORE_JOURNAL, STORE_CHATS, STORE_CUSTOM_SOUNDS];
       const existingStores = stores.filter(s => dbInstance.objectStoreNames.contains(s));
       const tx = dbInstance.transaction(existingStores, 'readwrite');
       existingStores.forEach(s => tx.objectStore(s).clear());
+      
+      // 5. Wipe Local Storage
       LOCAL_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
-      // Clear Guest Stats
       localStorage.removeItem('ekagrazone_guest_xp');
       localStorage.removeItem('ekagrazone_guest_level');
       localStorage.removeItem('ekagrazone_guest_totalFocusMs');
