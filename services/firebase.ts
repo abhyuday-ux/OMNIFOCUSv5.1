@@ -9,6 +9,7 @@ import { getAnalytics, isSupported } from "firebase/analytics";
 const firebaseConfig = {
   apiKey: "AIzaSyBCVT9moOC9VSatrlNlyWBrbqWr0ZIRQ1A",
   authDomain: "ekagrazone.firebaseapp.com",
+  databaseURL: "https://ekagrazone-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "ekagrazone",
   storageBucket: "ekagrazone.firebasestorage.app",
   messagingSenderId: "1020160533794",
