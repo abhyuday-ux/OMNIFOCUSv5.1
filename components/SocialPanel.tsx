@@ -39,22 +39,24 @@ const FriendRow: React.FC<{
     rank: number; 
     onClick: () => void 
 }> = ({ friend, rank, onClick }) => {
-    const [liveTime, setLiveTime] = useState<number>(friend.rtStatus?.todayBaseMs || 0);
+    const [liveTime, setLiveTime] = useState<number>(0);
     const [isFocusing, setIsFocusing] = useState(false);
     const [isOnline, setIsOnline] = useState(false);
+    const [currentTask, setCurrentTask] = useState<string>('');
 
     // Local RTDB Listener for this specific friend
     useEffect(() => {
-        const statusRef = ref(rtdb, `status/${friend.uid}`);
+        const statusRef = ref(rtdb, `users/${friend.uid}/publicStatus`);
         
         const handleUpdate = (snapshot: any) => {
             const val = snapshot.val();
             if (val) {
-                setIsOnline(val.state === 'online');
+                setIsOnline(val.isOnline);
                 setIsFocusing(val.isFocusing);
+                setCurrentTask(val.currentTask || '');
                 
                 // Base time from completed sessions
-                let total = val.todayBaseMs || 0;
+                let total = val.todayBaseMs || (val.todayFocusMinutes * 60000) || 0;
                 
                 // If actively running, add elapsed time since start
                 if (val.isFocusing && val.currentSessionStart) {
@@ -66,6 +68,7 @@ const FriendRow: React.FC<{
                 // Default fallback if no RTDB data (offline/new user)
                 setIsOnline(false);
                 setIsFocusing(false);
+                setCurrentTask('');
                 setLiveTime(friend.profile?.totalFocusMs || 0); 
             }
         };
@@ -120,8 +123,8 @@ const FriendRow: React.FC<{
                     <h4 className="font-bold text-sm text-slate-200 group-hover:text-white transition-colors">
                         {friend.profile?.displayName || 'Unknown'}
                     </h4>
-                    <p className="text-[10px] text-slate-500 font-mono">
-                        @{friend.profile?.username}
+                    <p className={`text-[10px] font-mono truncate max-w-[100px] ${isFocusing ? 'text-blue-400 animate-pulse' : 'text-slate-500'}`}>
+                        {isFocusing ? `Focusing: ${currentTask}` : `@${friend.profile?.username}`}
                     </p>
                 </div>
             </div>
@@ -131,7 +134,7 @@ const FriendRow: React.FC<{
                     {formatDuration(liveTime)}
                 </div>
                 <div className="text-[9px] text-slate-500 font-medium uppercase tracking-wider">
-                    {isFocusing ? 'Focusing...' : 'Today'}
+                    {isFocusing ? 'Live' : 'Today'}
                 </div>
             </div>
         </motion.div>
@@ -312,7 +315,7 @@ export const SocialPanel: React.FC<SocialPanelProps> = ({ onClose }) => {
                                         selectedFriend.profile?.displayName?.[0]
                                     )}
                                     {/* Online/Focus Status Ring */}
-                                    <div className={`absolute inset-0 border-2 rounded-3xl ${selectedFriend.rtStatus?.isFocusing ? 'border-blue-500 animate-pulse' : selectedFriend.rtStatus?.state === 'online' ? 'border-emerald-500' : 'border-transparent'}`} />
+                                    <div className={`absolute inset-0 border-2 rounded-3xl ${selectedFriend.rtStatus?.isFocusing ? 'border-blue-500 animate-pulse' : selectedFriend.rtStatus?.isOnline ? 'border-emerald-500' : 'border-transparent'}`} />
                                 </div>
                                 <h3 className="text-2xl font-bold text-white tracking-tight">{selectedFriend.profile?.displayName}</h3>
                                 <p className="text-xs text-slate-500 font-mono mt-1">@{selectedFriend.profile?.username}</p>

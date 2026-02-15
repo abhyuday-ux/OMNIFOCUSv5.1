@@ -142,11 +142,12 @@ export interface Friend {
   profile?: UserProfile;
   // Realtime fields from RTDB (merged in SocialPanel)
   rtStatus?: {
-      state: 'online' | 'offline';
+      isOnline: boolean;
       isFocusing: boolean;
+      currentTask?: string;
       todayBaseMs: number;
       currentSessionStart?: number;
-      lastChanged: number;
+      lastSeen: number;
   };
 }
 

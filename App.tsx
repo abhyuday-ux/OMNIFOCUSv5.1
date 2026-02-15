@@ -26,7 +26,7 @@ import { Zap, Wifi, WifiOff, RefreshCw, ChevronUp, ChevronDown, ChevronLeft, Che
 import { useTheme, ACCENT_COLORS } from './contexts/ThemeContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { rtdb } from './services/firebase';
-import { ref, set, onDisconnect, serverTimestamp } from 'firebase/database';
+import { ref, set, onDisconnect, serverTimestamp, onValue, update } from 'firebase/database';
 
 // ... (Helper functions like getYoutubeId, formatMiniTime, MiniTimer component remain unchanged) ...
 // Helper function to extract YouTube video ID
@@ -415,36 +415,55 @@ const App: React.FC = () => {
   useEffect(() => {
       if (!currentUser) return;
 
-      const userStatusRef = ref(rtdb, `status/${currentUser.uid}`);
-      const isOfflineForDatabase = { state: 'offline', lastChanged: serverTimestamp(), isFocusing: false };
+      const publicStatusRef = ref(rtdb, `users/${currentUser.uid}/publicStatus`);
+      const connectedRef = ref(rtdb, '.info/connected');
       
+      // Use ref for elapsedMs so interval can access current value without re-triggering effect
+      const elapsedRef = { current: elapsedMs };
+
       const updatePresence = () => {
-          set(userStatusRef, { 
-              state: 'online', 
-              lastChanged: serverTimestamp(), 
+          const subjectName = subjects.find(s => s.id === currentSubjectId)?.name || "Focusing";
+          
+          set(publicStatusRef, { 
+              isOnline: true,
+              lastSeen: serverTimestamp(),
               isFocusing: status === 'running',
-              // We send the 'base' time (finished sessions) + the start time of current session
-              // Friends can calculate live time: base + (now - start) if focusing
-              todayBaseMs: dailyTotalMs, 
-              currentSessionStart: status === 'running' ? Date.now() - elapsedMs : null
+              currentTask: status === 'running' ? subjectName : null,
+              todayBaseMs: dailyTotalMs, // Base time (finished sessions)
+              currentSessionStart: status === 'running' ? Date.now() - elapsedRef.current : null
           });
       };
 
-      // Set up presence system
-      updatePresence();
-      onDisconnect(userStatusRef).set(isOfflineForDatabase);
+      // Watch connection state
+      const unsubscribe = onValue(connectedRef, (snap) => {
+          if (snap.val() === true) {
+              onDisconnect(publicStatusRef).update({ 
+                  isOnline: false,
+                  isFocusing: false,
+                  lastSeen: serverTimestamp()
+              });
+              updatePresence();
+          }
+      });
 
-      // Update base stats periodically (e.g., every minute) to ensure consistency even if 'stop' misses
-      // This is less about "ticking" and more about data integrity for observers
-      let interval: number;
-      if (status === 'running') {
-          interval = window.setInterval(updatePresence, 30000); 
-      }
+      // Update presence immediately when status/subject changes
+      updatePresence();
+
+      // Periodic update to refresh lastSeen and ensure consistency
+      // Note: We don't rely on this loop for elapsed time precision, client does that.
+      const interval = setInterval(() => {
+          // Update ref value for interval closure
+          elapsedRef.current = elapsedMs; 
+          updatePresence();
+      }, 60000); 
 
       return () => {
-          if (interval) clearInterval(interval);
+          clearInterval(interval);
+          unsubscribe();
       };
-  }, [currentUser, status, dailyTotalMs, elapsedMs]);
+  }, [currentUser, status, dailyTotalMs, currentSubjectId, subjects]); 
+  // removed elapsedMs from dep array to avoid spam, interval handles updates if needed, 
+  // but crucially status change triggers immediate update with correct start time.
 
   useEffect(() => {
       // If timer becomes complete while running, notify
